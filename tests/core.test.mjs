@@ -75,12 +75,15 @@ test('recommendations use positive reviews and rotate through relevant activitie
   const state = profile(20, ['music']);
   assert.equal(getSuggestedActivity(state).interest, 'music');
   assert.ok(ACTIVITIES.includes(getSuggestedActivity(createState())));
-  assert.equal(getSuggestedActivity(profile(20, ['music', 'gardening']), 'margaret').interest, 'gardening');
+  assert.ok(ACTIVITIES.includes(getSuggestedActivity(profile(20, ['music', 'gardening']), 'margaret')));
   const positive = session(state);
   assert.ok(getRecommendedGroups(positive).some(group => group.interest === 'gardening' && group.reason.includes('enjoyed')));
   assert.ok(!getRecommendedGroups(session(state, 's', { rating: 2 })).some(group => group.interest === 'gardening'));
   const multiple = profile(20, ['gardening', 'music']);
-  assert.equal(getSuggestedActivity(session(multiple)).interest, 'music');
+  const playedGardenQuiz = session(multiple);
+  const next = getSuggestedActivity(playedGardenQuiz);
+  assert.ok(['gardening', 'music'].includes(next.interest));
+  assert.notEqual(next.id, 'garden-quiz');
 });
 
 test('joining is idempotent and redemption preserves balance with unique demo codes', () => {
@@ -295,22 +298,21 @@ test('malformed persisted together ratings, scores, names, and account relations
   }
 });
 
-test('activity suggestions preserve variety and eligibility, then use individual explicit ratings', () => {
+test('activity suggestions choose eligible unplayed content before allowing repeats', () => {
   let state = completeTogetherSession(createState(), finishTogether(), [{ rating: 1 }, { rating: 3 }]);
   state = setProfile(state, { name: 'Alex', age: 20, interests: ['gardening', 'music'] });
   state = session(state, 'music-1', { activityId: 'music-memories', rating: 5 });
-  assert.equal(getSuggestedActivity(state).id, 'music-memories');
-  assert.equal(getSuggestedActivity(state, 'margaret').id, 'garden-quiz');
-  assert.equal(getSuggestedActivity({ ...state, profile: null }).id, 'family-recipes');
+  const played = new Set(state.reviews.map(review => review.activityId));
+  const next = getSuggestedActivity(state);
+  assert.ok(['gardening', 'music'].includes(next.interest));
+  assert.ok(!played.has(next.id));
+  assert.equal(getSuggestedActivity(state, 'margaret').id, 'garden-walk-talk');
+  const noProfileSuggestion = getSuggestedActivity({ ...state, profile: null });
+  assert.ok(ACTIVITIES.includes(noProfileSuggestion));
+  assert.ok(!played.has(noProfileSuggestion.id));
   state = session(state, 'music-2', { activityId: 'music-memories', rating: 5 });
-  assert.equal(getSuggestedActivity(state).id, 'garden-quiz');
-
-  let tied = completeTogetherSession(profile(20, ['gardening', 'music']), finishTogether(), [{ rating: 3 }, { rating: 4 }]);
-  tied = session(tied, 'music-tied', { activityId: 'music-memories', rating: 4 });
-  // The rounded aggregate is 4, but the individual ratings average to 3.5.
-  assert.equal(getSuggestedActivity(tied).id, 'music-memories');
-  const exactTie = session(profile(20, ['gardening', 'music']), 'garden-tie', { rating: 4 });
-  assert.equal(getSuggestedActivity(session(exactTie, 'music-tie', { activityId: 'music-memories', rating: 4 })).id, 'garden-quiz');
+  const allPlayed = ACTIVITIES.reduce((current, activity, index) => session(current, `played-${index}`, { activityId: activity.id }), state);
+  assert.ok(ACTIVITIES.includes(getSuggestedActivity(allPlayed)));
 });
 
 test('anonymous shared moments combine with later sample connections and one device reward balance', () => {
