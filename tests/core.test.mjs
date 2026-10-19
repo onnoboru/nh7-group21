@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ACTIVITIES, GROUPS, INTERESTS, PEOPLE, REWARDS, STORAGE_KEY, createState, setProfile, getMode, getMatches, getRecommendedGroups, getSuggestedActivity, completeSession, createTogetherSession, answerTogetherQuestion, advanceTogetherSession, completeTogetherSession, joinGroup, redeemReward, saveState, loadState } from '../dist/core.js';
+import { ACTIVITIES, GROUPS, INTERESTS, PEOPLE, REWARDS, STORAGE_KEY, createState, setProfile, getMode, getMatches, getRecommendedGroups, getSuggestedActivity, completeSession, createTogetherSession, answerTogetherQuestion, advanceTogetherSession, skipTogetherStep, completeTogetherSession, joinGroup, redeemReward, saveState, loadState } from '../dist/core.js';
 
 const profile = (age = 20, interests = ['gardening'], guardianConsent = false) => setProfile(createState(), { name: ' Alex ', age, interests, guardianConsent });
 const session = (state, id = 'session-1', changes = {}) => completeSession(state, { id, personId: null, activityId: 'garden-quiz', rating: 5, note: ' Lovely! ', addFriend: false, ...changes });
@@ -248,12 +248,34 @@ test('together completion saves independent ratings and quiz scores, with one de
   assert.equal(review.rating, 4);
   assert.equal(review.note, '');
   assert.deepEqual(review.participants, [
-    { name: 'Alex', rating: 5, note: 'Great together!', score: 3 },
+    { name: 'Alex', rating: 5, note: 'Great together!', score: ACTIVITIES.find(activity => activity.id === 'garden-quiz').questions.length },
     { name: 'Pat', rating: 2, note: 'Try music next.', score: 0 },
   ]);
   assert.equal(completeTogetherSession(state, finished, bothReviews), state);
   assert.equal(completeSession(state, { id: finished.id }), state);
   assert.deepEqual(state.friends, []);
+});
+
+test('together participants can skip a quiz question or a shared conversation prompt', () => {
+  let quiz = together();
+  quiz = answerTogetherQuestion(quiz, quiz.activity.questions[0].correct);
+  quiz = skipTogetherStep(quiz);
+  assert.equal(quiz.revealed, true);
+  assert.deepEqual(quiz.answers.map(answers => answers[0]), [null, null]);
+  quiz = advanceTogetherSession(quiz);
+  assert.equal(quiz.step, 1);
+  while (!quiz.finished) {
+    quiz = skipTogetherStep(quiz);
+    if (!quiz.finished) quiz = advanceTogetherSession(quiz);
+  }
+  const completedQuiz = completeTogetherSession(createState(), quiz, bothReviews);
+  assert.deepEqual(completedQuiz.reviews[0].participants.map(participant => participant.score), [0, 0]);
+
+  let conversation = together('family-recipes');
+  conversation = skipTogetherStep(conversation);
+  assert.equal(conversation.step, 1);
+  while (!conversation.finished) conversation = skipTogetherStep(conversation);
+  assert.equal(completeTogetherSession(createState(), conversation, bothReviews).points, 30);
 });
 
 test('together recommendations consider either participant independently', () => {
@@ -289,7 +311,8 @@ test('together histories and redeemed rewards persist without a profile; old dat
 test('malformed persisted together ratings, scores, names, and account relationships are rejected', () => {
   const state = completeTogetherSession(createState(), finishTogether(), bothReviews);
   const original = state.reviews[0];
-  for (const change of [{ mode: 'remote' }, { personId: 'margaret' }, { rating: 1 }, { note: 'Unexpected aggregate note' }, { participants: [] }, { participants: [original.participants[0], { ...original.participants[1], name: 'alex' }] }, { participants: [original.participants[0], { ...original.participants[1], rating: 8 }] }, { participants: [original.participants[0], { ...original.participants[1], score: 4 }] }, { participants: [original.participants[0], { ...original.participants[1], score: null }] }]) {
+  const quizLength = ACTIVITIES.find(activity => activity.id === 'garden-quiz').questions.length;
+  for (const change of [{ mode: 'remote' }, { personId: 'margaret' }, { rating: 1 }, { note: 'Unexpected aggregate note' }, { participants: [] }, { participants: [original.participants[0], { ...original.participants[1], name: 'alex' }] }, { participants: [original.participants[0], { ...original.participants[1], rating: 8 }] }, { participants: [original.participants[0], { ...original.participants[1], score: quizLength + 1 }] }, { participants: [original.participants[0], { ...original.participants[1], score: null }] }]) {
     const malformed = { ...state, reviews: [{ ...original, ...change }] };
     assert.deepEqual(loadState(storage(JSON.stringify(malformed))), createState());
   }

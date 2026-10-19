@@ -43,6 +43,8 @@ export const ACTIVITIES = [
       { question: 'Which orchid was chosen as Singapore’s National Flower?', answers: ['Vanda Miss Joaquim', 'The moon orchid', 'The golden shower orchid'], correct: 0, explanation: 'Vanda Miss Joaquim was selected in 1981. Do either of you remember seeing it in a garden?' },
       { question: 'At Gardens by the Bay, what are the Supertrees?', answers: ['Vertical gardens', 'Real trees that grow fruit', 'Water towers'], correct: 0, explanation: 'They are vertical gardens displaying plants such as ferns and orchids. Which Singapore garden would you like to visit together?' },
       { question: 'Which fragrant leaf is used in pandan cakes and some rice dishes?', answers: ['Pandan', 'Mint', 'Basil'], correct: 0, explanation: 'Pandan leaves add fragrance to desserts and rice dishes, and pandan grows well in Singapore.' },
+      { question: 'Which part of a plant usually takes in water from the soil?', answers: ['Roots', 'Petals', 'Fruit'], correct: 0, explanation: 'Roots take up water and help hold a plant in place. What plants can you spot near home?' },
+      { question: 'Which plant part often grows into a fruit after flowering?', answers: ['The flower', 'The root', 'The stem'], correct: 0, explanation: 'In many plants, fruit develops from a flower after pollination. Have you ever grown a fruit or vegetable?' },
     ],
   },
   { id: 'family-recipes', title: 'A recipe worth sharing', interest: 'cooking', kind: 'conversation', description: 'Explore the memories and little rituals behind a favourite meal.', duration: '8 min', icon: '🥣', prompts: ['What meal reminds you of home, and why?', 'Which hawker dish would you introduce to someone visiting Singapore?', 'Who taught you something useful in the kitchen?', 'If we cooked a meal together, what would each of us make?', 'What smell from a kitchen brings back a happy memory?', 'Which local fruit would you bring to a family picnic?', 'What is a small cooking job you could teach each other?'] },
@@ -50,23 +52,29 @@ export const ACTIVITIES = [
   { id: 'small-stories', title: 'Then, now, and someday', interest: 'stories', kind: 'conversation', description: 'Trade small stories about the world you know and the one you imagine.', duration: '10 min', icon: '📖', prompts: ['What was a favourite game you played when you were younger?', 'What was your Singapore neighbourhood like when you were young?', 'What is something someone from another generation has taught you?', 'What is a small adventure you would like to have next?', 'What was your favourite place to visit as a child?', 'What has changed in Singapore that surprised you most?', 'What skill would you like to learn from each other?'] },
   { id: 'creative-colours', title: 'See the world in colour', interest: 'art', kind: 'conversation', description: 'A simple creative conversation. Paper and pencils are optional.', duration: '8 min', icon: '🎨', prompts: ['Choose a colour that fits your mood. What does it remind you of?', 'Find an everyday object nearby. What makes its shape interesting?', 'Describe or draw a place you would both enjoy visiting.', 'What would you like to learn to make with your hands?', 'What pattern have you seen in a Singapore building or garden?', 'If you made a card for someone, what would you draw?', 'What is the most beautiful thing you noticed this week?'] },
   {
-    id: 'playful-puzzles', title: 'Great minds play together', interest: 'games', kind: 'quiz', description: 'Team up for three lighthearted brain teasers.', duration: '5 min', icon: '🎲',
+    id: 'playful-puzzles', title: 'Great minds play together', interest: 'games', kind: 'quiz', description: 'Team up for lighthearted brain teasers.', duration: '6 min', icon: '🎲',
     prompts: ['What Singapore place would you like to explore together?'],
     questions: [
       { question: 'How many stars are on Singapore’s flag?', answers: ['Three', 'Five', 'Seven'], correct: 1, explanation: 'The five stars represent democracy, peace, progress, justice, and equality. Which of these values feels most meaningful to you?' },
       { question: 'Which of these is a familiar dish at Singapore hawker centres?', answers: ['Chicken rice', 'Fish and chips', 'Tacos'], correct: 0, explanation: 'Chicken rice is one of Singapore’s well-known hawker dishes. What is your favourite stall or version?' },
       { question: 'Hawker culture was added to UNESCO’s Intangible Cultural Heritage list in which year?', answers: ['2015', '2020', '2024'], correct: 1, explanation: 'Singapore’s hawker culture was inscribed in 2020. Hawker centres are also places where people meet, eat, and spend time together.' },
+      { question: 'A plate has 6 pieces of toast. You share 2. How many pieces are left?', answers: ['3', '4', '5'], correct: 1, explanation: 'Six take away two leaves four. What would you enjoy sharing with someone?' },
+      { question: 'What number comes next: 2, 4, 6, ...?', answers: ['7', '8', '10'], correct: 1, explanation: 'The numbers go up by two, so eight comes next. Can you make a number pattern together?' },
+      { question: 'Which one does not belong with the others?', answers: ['Cup', 'Bowl', 'Bicycle'], correct: 2, explanation: 'A bicycle is a way to travel; a cup and bowl are things used for food or drink. What other groups can you think of?' },
     ],
   },
   { id: 'random-talk', title: 'A question out of the hat', interest: 'stories', kind: 'random', description: 'Pick a surprise prompt and follow wherever the conversation goes.', duration: '5 min', icon: '🎁', prompts: ['What tiny thing can instantly improve your day?', 'What would you teach someone in five minutes?', 'Which place would you revisit for one afternoon?', 'What is a funny thing you believed as a child?', 'What would your perfect slow day include?', 'Which everyday invention deserves more appreciation?', 'What is something in Singapore you would like to show a visitor?', 'What kind thing did someone do for you recently?', 'If you had a free afternoon together, what would you do?'] },
   { id: 'would-you-rather', title: 'Pick a side', interest: 'games', kind: 'choice', description: 'Choose between two playful options, then trade your reasons.', duration: '5 min', icon: '↔️', prompts: ['Would you rather spend an afternoon at Gardens by the Bay or Singapore Botanic Gardens?', 'Would you rather try a new hawker dish or revisit a favourite one?', 'Would you rather explore a nature park or discover a neighbourhood you have never visited?', 'Would you rather revisit one day from the past or peek at one day in the future?', 'Would you rather learn a family recipe or teach someone a game?', 'Would you rather take the MRT to a new place or walk around your neighbourhood?', 'Would you rather have a picnic by the sea or in a garden?'] },
   { id: 'story-stitch', title: 'One story, two imaginations', interest: 'stories', kind: 'collaborative', description: 'Take turns adding a sentence and build a story together.', duration: '8 min', icon: '🧵', prompts: ['Choose a hero and give them an unusual object.', 'Add a surprising place where the hero arrives.', 'Introduce a kind helper or a funny obstacle.', 'Decide how the adventure ends together.', 'Give the hero a neighbour who knows a useful secret.', 'Add a Singapore rain shower and decide what the hero does.', 'Invent a local snack that gives the hero a special power.'] },
   { id: 'then-and-now', title: 'Then & now', interest: 'music', kind: 'reflection', description: 'Compare the little things that have changed—and what still feels the same.', duration: '8 min', icon: '⌛', prompts: ['What song or sound takes you back to a particular time?', 'How has the way people keep in touch changed?', 'What is one thing that has stayed wonderful across generations?', 'What new tradition would you like to start together?', 'What did a typical weekend look like when you were young?', 'Which old and new ways of getting around do you both like?', 'What do you hope will never change about your family?'] },
-  { id: 'singapore-quiz', title: 'Singapore, together', interest: 'stories', kind: 'quiz', description: 'Explore familiar places, food, and nature around Singapore.', duration: '6 min', icon: '🇸🇬', prompts: ['Which Singapore place would you like to visit together?'], questions: [
+  { id: 'singapore-quiz', title: 'Singapore, together', interest: 'stories', kind: 'quiz', description: 'Explore familiar places, food, and nature around Singapore.', duration: '8 min', icon: '🇸🇬', prompts: ['Which Singapore place would you like to visit together?'], questions: [
     { question: 'Which island is home to the Singapore Zoo?', answers: ['Sentosa', 'Pulau Ubin', 'Singapore mainland'], correct: 2, explanation: 'The Singapore Zoo is in Mandai, on the mainland. Have either of you visited?' },
     { question: 'What is a common name for Singapore’s national language, Malay, in everyday conversation?', answers: ['Bahasa Melayu', 'Tamil', 'Hokkien'], correct: 0, explanation: 'Malay is one of Singapore’s four official languages. What languages do you hear in your neighbourhood?' },
     { question: 'Which local tree is known for its bright red flowers?', answers: ['Rain tree', 'Flame of the Forest', 'Pandan tree'], correct: 1, explanation: 'The Flame of the Forest has striking red-orange flowers. Have you seen one in bloom?' },
     { question: 'What can you find at a wet market?', answers: ['Fresh produce and food', 'Only books', 'Train tickets'], correct: 0, explanation: 'Wet markets sell fresh produce, meat, seafood, and more. Which market do you remember visiting?' },
+    { question: 'Which four languages are official languages of Singapore?', answers: ['English, Malay, Mandarin, and Tamil', 'English, Malay, Hokkien, and Japanese', 'Malay, Tamil, Cantonese, and French'], correct: 0, explanation: 'Singapore has four official languages: English, Malay, Mandarin, and Tamil. Which languages do you use with family or friends?' },
+    { question: 'Which Singapore symbol has a lion’s head and a fish’s body?', answers: ['The Merlion', 'The Singapore Flyer', 'The Supertree'], correct: 0, explanation: 'The Merlion combines a lion’s head and a fish’s body. What symbol would you choose to represent Singapore?' },
+    { question: 'What is a popular way to explore the village paths on Pulau Ubin?', answers: ['By bicycle', 'By cable car', 'By underground train'], correct: 0, explanation: 'Visitors often explore Pulau Ubin by bicycle or on foot. Which part of the island would you like to see?' },
   ] },
   { id: 'garden-walk-talk', title: 'A walk through Singapore', interest: 'gardening', kind: 'conversation', description: 'Share favourite green spaces and small discoveries in nature.', duration: '8 min', icon: '🌳', prompts: ['Which park or garden would you show a visitor first?', 'What bird or butterfly have you noticed nearby?', 'Would you rather walk by the sea or under shady trees?', 'What plant reminds you of someone in your family?', 'Which Singapore garden would you like to explore next?', 'What is a peaceful place you enjoy returning to?'] },
   { id: 'hawker-choices', title: 'Hawker favourites', interest: 'cooking', kind: 'choice', description: 'Pick a favourite and trade the stories behind it.', duration: '6 min', icon: '🍜', prompts: ['Would you choose kaya toast or roti prata for breakfast?', 'Would you share chicken rice or laksa with a visitor?', 'Would you try a new stall or return to your favourite?', 'Would you pick iced kopi or teh tarik on a warm day?', 'Would you rather order one big dish to share or several small bites?'] },
@@ -243,11 +251,12 @@ function checkTogetherSession(session) {
   if (!Array.isArray(session.answers) || session.answers.length !== 2 || session.answers.some(answers => !Array.isArray(answers))) fail('Invalid activity answers.');
   if (activity.kind === 'quiz') {
     session.answers.forEach(answers => Array.from(answers).forEach((answer, index) => {
-      if (!Number.isInteger(answer) || !activity.questions[index] || answer < 0 || answer >= activity.questions[index].answers.length) fail('Invalid activity answers.');
+      if (!activity.questions[index] || (answer !== null && (!Number.isInteger(answer) || answer < 0 || answer >= activity.questions[index].answers.length))) fail('Invalid activity answers.');
     }));
     const lengths = session.revealed ? [session.step + 1, session.step + 1]
       : session.turn === 0 ? [session.step, session.step] : [session.step + 1, session.step];
     if (session.answers.some((answers, index) => answers.length !== lengths[index]) || (session.revealed && session.turn !== 1)) fail('Both participants must answer in turn.');
+    if (session.revealed && ((session.answers[0][session.step] === null) !== (session.answers[1][session.step] === null))) fail('A skipped question must be skipped by both participants.');
     if (session.finished && (session.step !== count - 1 || !session.revealed)) fail('Finish every question before reviewing the activity.');
   } else {
     if (session.answers.some(answers => answers.length) || session.revealed) fail('Invalid conversation progress.');
@@ -275,6 +284,21 @@ export function advanceTogetherSession(session) {
   if (activity.kind !== 'quiz' && session.turn === 0) return { ...session, activity, turn: 1 };
   const count = activity.kind === 'quiz' ? activity.questions.length : activity.prompts.length;
   if (session.step === count - 1) return { ...session, activity, finished: true };
+  return { ...session, activity, step: session.step + 1, turn: 0, revealed: false };
+}
+
+export function skipTogetherStep(session) {
+  const activity = checkTogetherSession(session);
+  if (!session.started || session.finished) fail('Start an unfinished activity before continuing.');
+  if (activity.kind === 'quiz') {
+    if (session.revealed) fail('This question has already been answered. Continue to the next question.');
+    const answers = session.answers.map(items => [...items]);
+    answers[0][session.step] = null;
+    answers[1][session.step] = null;
+    return { ...session, activity, answers, turn: 1, revealed: true };
+  }
+  const count = activity.prompts.length;
+  if (session.step === count - 1) return { ...session, activity, turn: 1, finished: true };
   return { ...session, activity, step: session.step + 1, turn: 0, revealed: false };
 }
 

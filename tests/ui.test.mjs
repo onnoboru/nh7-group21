@@ -10,10 +10,14 @@ import * as core from '../dist/core.js';
 const source = readFileSync(new URL('../dist/app.js', import.meta.url), 'utf8')
   .replace(/^import \{[\s\S]*?\} from '\.\/core\.js';/, '');
 
-function harness({ initial = null, blocked = false } = {}) {
+function harness({ initial = null, initialPreferences = null, blocked = false } = {}) {
   const handlers = {};
   const nodes = new Map();
   const saved = new Map(initial ? [[core.STORAGE_KEY, JSON.stringify(initial)]] : []);
+  if (initialPreferences) saved.set('kindred-local-preferences-v1', JSON.stringify(initialPreferences));
+  const speechCalls = [];
+  class TestSpeechSynthesisUtterance { constructor(text) { this.text = text; } }
+  const speechSynthesis = { cancel() {}, speak(utterance) { speechCalls.push(utterance.text); } };
   let document;
   function element(id) {
     if (!nodes.has(id)) nodes.set(id, {
@@ -40,6 +44,7 @@ function harness({ initial = null, blocked = false } = {}) {
   const location = { hash: '' };
   const context = createContext({
     ...core, document, location, localStorage: storage,
+    SpeechSynthesisUtterance: TestSpeechSynthesisUtterance, speechSynthesis,
     loadState: () => core.loadState(storage), saveState: state => core.saveState(state, storage),
     window: { scrollTo() {}, addEventListener() {} },
     history: { replaceState(_a, _b, hash) { location.hash = hash; } },
@@ -57,6 +62,10 @@ function harness({ initial = null, blocked = false } = {}) {
     dialog: () => element('#dialog-root').innerHTML,
     status: () => element('#status').textContent,
     error: selector => element(selector).textContent,
+    preferences: () => JSON.parse(saved.get('kindred-local-preferences-v1') || '{}'),
+    textSize: () => document.body.dataset.textSize,
+    speechCalls,
+    change(id, checked) { handlers.change({ target: { matches: selector => selector === `#${id}`, checked } }); },
     input(id, data) { handlers.input({ target: { form: { id, data } } }); },
     stored: () => core.loadState(storage),
     submit(id, data, dataset = {}) { handlers.submit({ preventDefault() {}, target: { id, data, dataset } }); },
@@ -278,6 +287,64 @@ test('two people can play a quiz without a profile, keep answers private until b
   assert.match(reloaded.dialog(), /Reset all demo data/);
   await reloaded.click('reset');
   assert.equal(reloaded.stored().reviews.length, 0);
+});
+
+test('quiz question can be skipped together without counting as a correct answer', async () => {
+  const ui = harness();
+  const session = await startTogether(ui, { kind: 'quiz' });
+  const question = session.activity.questions[0];
+  await ui.click('together-answer', { index: String(question.correct) });
+  await ui.click('together-skip');
+  assert.equal(ui.session().revealed, true);
+  assert.deepEqual(ui.session().answers.map(answers => answers[0]), [null, null]);
+  assert.match(ui.dialog(), /Skipped together/);
+  await ui.click('together-next');
+  assert.equal(ui.session().step, 1);
+});
+
+test('solo quiz can skip a question and continue without a selection', async () => {
+  const ui = harness();
+  profile(ui);
+  await ui.click('start-activity', { id: 'garden-quiz' });
+  await ui.click('session-start');
+  await ui.click('session-skip');
+  assert.equal(ui.session().step, 1);
+  assert.equal(ui.session().answers[0], null);
+  assert.match(ui.dialog(), /QUESTION 2 OF/);
+});
+
+test('display preferences, read aloud, and saved pair quick start work on this device', async () => {
+  const ui = harness();
+  await ui.click('profile');
+  await ui.click('display-settings');
+  assert.match(ui.dialog(), /Text size/);
+  assert.match(ui.dialog(), /Read prompts aloud automatically/);
+  await ui.click('text-size', { size: 'extra-large' });
+  assert.equal(ui.textSize(), 'extra-large');
+  assert.equal(ui.preferences().textSize, 'extra-large');
+  ui.change('auto-read-toggle', true);
+  assert.equal(ui.preferences().autoRead, true);
+  await ui.click('profile');
+
+  const session = await startTogether(ui, { kind: 'quiz', name0: 'Alex', name1: 'Gran' });
+  assert.ok(session.activity.questions.length > 3);
+  assert.ok(ui.speechCalls.some(text => text.includes(session.activity.questions[0].question)));
+  await ui.click('close-dialog');
+  await ui.click('session-quit');
+  await ui.click('together-setup');
+  assert.match(ui.dialog(), /Quick start · Alex &amp; Gran/);
+  assert.match(ui.dialog(), /value="Alex"/);
+  const reloaded = harness({ initialPreferences: ui.preferences() });
+  assert.equal(reloaded.textSize(), 'extra-large');
+  await reloaded.click('together-setup');
+  assert.match(reloaded.dialog(), /Quick start · Alex &amp; Gran/);
+  await ui.click('quick-pair-play');
+  assert.deepEqual(ui.session().participants.map(participant => participant.name), ['Alex', 'Gran']);
+  await ui.click('close-dialog');
+  await ui.click('together-setup');
+  await ui.click('forget-pair');
+  assert.doesNotMatch(ui.dialog(), /Play together again/);
+  assert.equal(ui.preferences().lastPair, null);
 });
 
 test('face-to-face conversations need both turns and finish without a rating form', async () => {

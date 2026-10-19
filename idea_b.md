@@ -1,9 +1,0 @@
-Who: kids aged 6-12 (can be expandable, but keep our frame to this first to generate ideas) and elderly living in the same households
-Why: Elderly within the same household as their families still report feeling lonely, widens the intergenerational gap.
-What: An app that hopes to foster better and stronger relationships between children and elderly, hopefully extending into their adolescent periods.
-Where: Their homes??
-How: 
-- The app can have a few "default" games, such as the We Are Not Really Strangers game i mentioned in call, as well as maybe other games which arent so deep but fun to play like taboo or poetry for neanderthals. 
-- Every day/few days the game has a tracking mechanism that ensures that they are playing it, giving them a sort of initial reason to play it (similar to duolingo)
-- where AI comes in: it can monitor the sessions; where there is more engagement or deeper connections, or when it realises the sessions are longer than normal (and can thus determine whether they like the game), it can choose to suggest new games or different questions based on their interest. Idea of catering ideas and making the system more dynamic so it doesnt get stale
-- idea by eric to make it a kampung style system: to encourage the elderly to maybe play together, if their child isnt home and they are bored. maybe there can be a gps system where if there are other people with the app nearby and are bored, they can be pinged to come over and talk and play together. these games would then be catered more towards the elderly, as the "kid" aspect of it no longer needs to be fulfilled (Important not to highlight this as a main feature, because the big problem statement is the gap between CHILDREN and ELDERLY, but this can be a plus to address the overarching problem of loneliness.)

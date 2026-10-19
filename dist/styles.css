@@ -715,3 +715,71 @@ input:not([type="checkbox"]):not([type="radio"]), textarea, select { min-height:
   .game-style-name { font-size: 20px; }
   .journey-stats dt { font-size: 17px; }
 }
+
+.saved-pair { display: grid; gap: 11px; margin: 0 0 22px; padding: 17px; border: 1px solid #cfd9c5; border-radius: 15px; background: #f0f4e9; }
+.saved-pair > div:first-child { display: flex; align-items: center; gap: 12px; }
+.saved-pair h3 { margin: 0 0 3px; font-size: 20px; }
+.saved-pair p { margin: 0; color: var(--muted); font-size: 16px; }
+.saved-pair-icon { display: grid; place-items: center; flex: 0 0 48px; width: 48px; height: 48px; border-radius: 50%; background: #e0e9d7; font-size: 26px; }
+.text-size-grid { display: grid; gap: 9px; }
+.text-size-grid .button { justify-content: flex-start; width: 100%; text-align: left; }
+.reading-toggle { margin: 18px 0; padding: 15px; border: 1px solid var(--line); border-radius: 11px; background: #fbfcf7; }
+.reading-toggle small { display: block; margin-top: 4px; color: var(--muted); line-height: 1.45; }
+.session-audio-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; margin-bottom: 10px; }
+.session-footer { justify-content: flex-end; }
+.session-footer > .field-help { margin-right: auto; }
+.celebration .button { position: relative; z-index: 1; min-width: 240px; margin-top: 7px; }
+body[data-text-size="comfortable"] .prompt-text { font-size: 23px; }
+body[data-text-size="comfortable"] .quiz-option { font-size: 18px; }
+body[data-text-size="comfortable"] .turn-label { font-size: 18px; }
+body[data-text-size="comfortable"] .muted,
+body[data-text-size="comfortable"] .field-help,
+body[data-text-size="comfortable"] .notice,
+body[data-text-size="comfortable"] .card > p { font-size: 16px; }
+body[data-text-size="comfortable"] .form-field label,
+body[data-text-size="comfortable"] fieldset legend { font-size: 17px; }
+body[data-text-size="comfortable"] input:not([type="checkbox"]):not([type="radio"]),
+body[data-text-size="comfortable"] textarea,
+body[data-text-size="comfortable"] select { font-size: 18px; }
+body[data-text-size="comfortable"] .modal-heading h2 { font-size: 29px; }
+body[data-text-size="large"] .prompt-text { font-size: 29px; }
+body[data-text-size="large"] .quiz-option { font-size: 21px; }
+body[data-text-size="large"] .turn-label { font-size: 22px; }
+body[data-text-size="large"] .field-help { font-size: 19px; }
+body[data-text-size="large"] .muted,
+body[data-text-size="large"] .notice,
+body[data-text-size="large"] .card > p { font-size: 19px; }
+body[data-text-size="large"] .form-field label,
+body[data-text-size="large"] fieldset legend { font-size: 20px; }
+body[data-text-size="large"] input:not([type="checkbox"]):not([type="radio"]),
+body[data-text-size="large"] textarea,
+body[data-text-size="large"] select { font-size: 21px; }
+body[data-text-size="large"] .modal-heading h2 { font-size: 34px; }
+body[data-text-size="extra-large"] .prompt-text { font-size: 33px; line-height: 1.35; }
+body[data-text-size="extra-large"] .quiz-option { min-height: 72px; font-size: 24px; }
+body[data-text-size="extra-large"] .turn-label { font-size: 24px; }
+body[data-text-size="extra-large"] .field-help,
+body[data-text-size="extra-large"] .muted,
+body[data-text-size="extra-large"] .notice,
+body[data-text-size="extra-large"] .card > p,
+body[data-text-size="extra-large"] .session-footer .button { font-size: 21px; }
+body[data-text-size="extra-large"] .button { min-height: 62px; }
+body[data-text-size="extra-large"] .form-field label,
+body[data-text-size="extra-large"] fieldset legend { font-size: 22px; }
+body[data-text-size="extra-large"] input:not([type="checkbox"]):not([type="radio"]),
+body[data-text-size="extra-large"] textarea,
+body[data-text-size="extra-large"] select { font-size: 23px; }
+body[data-text-size="extra-large"] .modal-heading h2 { font-size: 36px; }
+body[data-text-size="extra-large"] .page-title { font-size: clamp(38px, 3vw, 46px); }
+@media (max-width: 760px) {
+  body[data-text-size="comfortable"] .prompt-text { font-size: 24px; }
+  body[data-text-size="large"] .prompt-text { font-size: 29px; }
+  body[data-text-size="extra-large"] .prompt-text { font-size: 32px; }
+  body[data-text-size="extra-large"] .quiz-option { font-size: 23px; }
+  body[data-text-size="extra-large"] .page-title { font-size: 38px; }
+  .session-audio-controls { justify-content: flex-start; }
+  .session-footer { justify-content: stretch; }
+  .session-footer > .field-help { flex-basis: 100%; }
+  .session-footer > .button { flex: 1 1 auto; }
+  .celebration .button { width: 100%; max-width: 320px; }
+}

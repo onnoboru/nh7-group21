@@ -1,7 +1,7 @@
 import {
   INTERESTS, PEOPLE, GROUPS, REWARDS, ACTIVITIES, STORAGE_KEY, createState, loadState, saveState,
   setProfile, getMode, getMatches, getRecommendedGroups, getSuggestedActivity, getDailyTheme, getDateKey, getJourneyStats,
-  completeSession, joinGroup, redeemReward, createTogetherSession, answerTogetherQuestion, advanceTogetherSession, completeTogetherSession,
+  completeSession, joinGroup, redeemReward, createTogetherSession, answerTogetherQuestion, advanceTogetherSession, skipTogetherStep, completeTogetherSession,
 } from './core.js';
 
 const app = document.querySelector('#app');
@@ -13,7 +13,53 @@ let session = null;
 let returnFocus = null;
 let toastTimer;
 let storageAvailable = true;
+const PREFERENCES_KEY = 'kindred-local-preferences-v1';
+const GAME_KINDS = ['quiz', 'conversation', 'random', 'choice', 'collaborative', 'reflection'];
 try { void localStorage.length; } catch { storageAvailable = false; }
+
+function loadPreferences() {
+  const defaults = { textSize: 'large', autoRead: false, lastPair: null };
+  try {
+    const stored = JSON.parse(localStorage.getItem(PREFERENCES_KEY) || 'null');
+    if (!stored || typeof stored !== 'object') return defaults;
+    const textSize = ['comfortable', 'large', 'extra-large'].includes(stored.textSize) ? stored.textSize : defaults.textSize;
+    const names = stored.lastPair?.names;
+    const kind = stored.lastPair?.kind;
+    const lastPair = Array.isArray(names) && names.length === 2 && names.every(name => typeof name === 'string' && name.trim() && name.trim().length <= 40)
+      && names[0].trim().toLowerCase() !== names[1].trim().toLowerCase() && GAME_KINDS.includes(kind)
+      ? { names: names.map(name => name.trim()), kind } : null;
+    return { textSize, autoRead: stored.autoRead === true, lastPair };
+  } catch { return defaults; }
+}
+let preferences = loadPreferences();
+function applyPresentationPreferences() {
+  document.body.dataset.textSize = preferences.textSize;
+}
+function savePreferences(changes) {
+  preferences = { ...preferences, ...changes };
+  try { localStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences)); } catch { /* Keep the preference for this visit. */ }
+  applyPresentationPreferences();
+}
+applyPresentationPreferences();
+function speechAvailable() {
+  return typeof globalThis.SpeechSynthesisUtterance === 'function' && Boolean(globalThis.speechSynthesis);
+}
+function speak(text) {
+  if (!speechAvailable()) { notify('Read aloud is not available in this browser.'); return; }
+  globalThis.speechSynthesis.cancel();
+  const utterance = new globalThis.SpeechSynthesisUtterance(text);
+  utterance.lang = 'en-SG';
+  globalThis.speechSynthesis.speak(utterance);
+}
+function speechTextForSession() {
+  if (!session) return '';
+  const activity = session.activity;
+  if (activity.kind !== 'quiz') return promptFor(session, session.step);
+  const question = activity.questions[session.step];
+  const answers = question.answers.map((answer, index) => `Option ${String.fromCharCode(65 + index)}: ${answer}`).join('. ');
+  if (session.revealed) return `${question.question}. The correct answer is ${question.answers[question.correct]}. ${question.explanation}`;
+  return `${question.question}. ${answers}`;
+}
 
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const icon = (name) => {
@@ -154,7 +200,12 @@ function dialogHeading(eyebrow, title) {
 }
 function showProfile() {
   const profile = state.profile;
-  showDialog(`${dialogHeading(profile ? 'MAKE YOURSELF AT HOME' : 'LET’S START WITH YOU', profile ? 'Your profile & settings' : 'A few things in common.')}<form id="profile-form"><div class="form-row"><div class="form-field"><label for="profile-name">Your nickname</label><input id="profile-name" name="name" autocomplete="nickname" required maxlength="40" value="${esc(profile?.name || '')}" placeholder="What should we call you?"></div><div class="form-field age-field"><label for="profile-age">Your age</label><input id="profile-age" name="age" type="number" min="6" max="110" required value="${profile?.age || ''}" inputmode="numeric" placeholder="e.g. 24"></div></div><fieldset class="form-field"><legend>What lights you up?</legend><p class="field-help">Choose one or more interests. We’ll find the things you share.</p><div class="choice-grid">${INTERESTS.map(item => `<label class="choice ${profile?.interests.includes(item.id) ? 'selected' : ''}"><input class="interest-check" type="checkbox" name="interests" value="${esc(item.id)}" ${profile?.interests.includes(item.id) ? 'checked' : ''}><span aria-hidden="true">${esc(item.icon)}</span> ${esc(item.label)}</label>`).join('')}</div></fieldset><label class="consent-field"><input name="guardianConsent" type="checkbox" ${profile?.guardianConsent ? 'checked' : ''}><span>A parent or guardian is involved and agrees to exploring the community demo.<small>For ages 12–17. Under 12 always uses family mode, with activities at home.</small></span></label><p class="field-help">Ages 12–17 without guardian involvement also use family mode. This is a prototype setting, not a verified consent process.</p><p class="form-error" id="profile-error" role="alert"></p><div class="form-actions">${profile || state.reviews.length || state.redemptions.length ? button('Reset demo data', 'reset-confirm', 'ghost danger') : ''}<button class="button primary" type="submit">${profile ? 'Save profile' : 'Find my kind of people'} ${icon('arrow')}</button></div></form>`, { initialFocus: '#profile-name' });
+  showDialog(`${dialogHeading(profile ? 'MAKE YOURSELF AT HOME' : 'LET’S START WITH YOU', profile ? 'Your profile & settings' : 'A few things in common.')}<form id="profile-form"><div class="form-row"><div class="form-field"><label for="profile-name">Your nickname</label><input id="profile-name" name="name" autocomplete="nickname" required maxlength="40" value="${esc(profile?.name || '')}" placeholder="What should we call you?"></div><div class="form-field age-field"><label for="profile-age">Your age</label><input id="profile-age" name="age" type="number" min="6" max="110" required value="${profile?.age || ''}" inputmode="numeric" placeholder="e.g. 24"></div></div><fieldset class="form-field"><legend>What lights you up?</legend><p class="field-help">Choose one or more interests. We’ll find the things you share.</p><div class="choice-grid">${INTERESTS.map(item => `<label class="choice ${profile?.interests.includes(item.id) ? 'selected' : ''}"><input class="interest-check" type="checkbox" name="interests" value="${esc(item.id)}" ${profile?.interests.includes(item.id) ? 'checked' : ''}><span aria-hidden="true">${esc(item.icon)}</span> ${esc(item.label)}</label>`).join('')}</div></fieldset><label class="consent-field"><input name="guardianConsent" type="checkbox" ${profile?.guardianConsent ? 'checked' : ''}><span>A parent or guardian is involved and agrees to exploring the community demo.<small>For ages 12–17. Under 12 always uses family mode, with activities at home.</small></span></label><p class="field-help">Ages 12–17 without guardian involvement also use family mode. This is a prototype setting, not a verified consent process.</p><p class="form-error" id="profile-error" role="alert"></p><div class="form-actions">${profile || state.reviews.length || state.redemptions.length ? button('Reset demo data', 'reset-confirm', 'ghost danger') : ''}<button class="button primary" type="submit">${profile ? 'Save profile' : 'Find my kind of people'} ${icon('arrow')}</button>${button('Display & reading', 'display-settings', 'ghost')}</div></form>`, { initialFocus: '#profile-name' });
+}
+
+function showDisplaySettings() {
+  const sizes = [['comfortable', 'Comfortable'], ['large', 'Large'], ['extra-large', 'Extra large']];
+  showDialog(`${dialogHeading('DISPLAY & READING', 'Make this easier to read.')}<fieldset class="form-field text-size-options"><legend>Text size</legend><div class="text-size-grid">${sizes.map(([value, label]) => `<button type="button" class="button ${preferences.textSize === value ? 'primary' : 'secondary'}" data-action="text-size" data-size="${value}" aria-pressed="${preferences.textSize === value}">${label}</button>`).join('')}</div></fieldset><label class="consent-field reading-toggle"><input id="auto-read-toggle" type="checkbox" ${preferences.autoRead ? 'checked' : ''} ${speechAvailable() ? '' : 'disabled'}><span>Read prompts aloud automatically<small>${speechAvailable() ? 'The device reads each new question or prompt in English.' : 'Read aloud is not available in this browser.'}</small></span></label><p class="field-help">Your display and reading choices are saved only on this device.</p>${button('Test read aloud', 'test-read-aloud', 'secondary', speechAvailable() ? '' : 'disabled')}<div class="form-actions">${button('Back to profile', 'profile', 'primary')}</div>`);
 }
 
 function sessionId() {
@@ -178,9 +229,11 @@ function promptCount(activitySession) {
 }
 function showTogetherSetup(activityId, requestedKind = '') {
   const pinned = activityId === getDailyTheme(state).id ? ACTIVITIES.find(activity => activity.id === activityId) : null;
-  const selectedKind = pinned?.kind || requestedKind;
+  const selectedKind = pinned?.kind || requestedKind || preferences.lastPair?.kind;
   const modes = [['quiz', 'Quiz'], ['conversation', 'Guided Talk'], ['random', 'Random Talk'], ['choice', 'Would You Rather'], ['collaborative', 'Story Game'], ['reflection', 'Then & Now']];
-  showDialog(`${dialogHeading('PLAY TOGETHER', 'Choose a game.')}<form id="together-setup-form" data-pinned="${pinned ? esc(pinned.id) : ''}"><fieldset class="game-style-field"><legend>Game style</legend><div class="game-style-grid">${modes.map(([kind, label]) => `<label class="game-style-card"><input class="game-style-radio" type="radio" name="kind" value="${kind}" required ${kind === selectedKind ? 'checked' : ''}><span class="game-style-picture">${gameStyleIllustration(kind)}</span><span class="game-style-name">${label}</span></label>`).join('')}</div></fieldset><div class="together-player-fields">${[0, 1].map(index => `<div class="form-field"><label for="together-name-${index}">Player ${index + 1}</label><input id="together-name-${index}" name="name${index}" maxlength="40" required autocomplete="off" placeholder="${index ? 'Gran' : 'Alex'}"></div>`).join('')}</div><p class="form-error" id="together-setup-error" role="alert"></p><div class="form-actions">${button('Cancel', 'close-dialog', 'ghost')}<button class="button primary" type="submit">Next ${icon('arrow')}</button></div></form>`, { initialFocus: '.game-style-radio' });
+  const names = preferences.lastPair?.names || ['', ''];
+  const quickStart = preferences.lastPair ? `<div class="saved-pair"><div><span class="saved-pair-icon" aria-hidden="true">👥</span><div><h3>Play together again</h3><p>${preferences.lastPair.names.map(esc).join(' &amp; ')} · saved on this device</p></div></div>${button(`Quick start · ${preferences.lastPair.names.map(esc).join(' &amp; ')}`, 'quick-pair-play', 'primary', `data-kind="${esc(preferences.lastPair.kind)}"`)}<p>Edit either name in the fields below.</p>${button('Forget saved names', 'forget-pair', 'ghost small', `data-kind="${esc(selectedKind || preferences.lastPair.kind)}"`)}</div>` : '';
+  showDialog(`${dialogHeading('PLAY TOGETHER', 'Choose a game.')}${quickStart}<form id="together-setup-form" data-pinned="${pinned ? esc(pinned.id) : ''}"><fieldset class="game-style-field"><legend>Game style</legend><div class="game-style-grid">${modes.map(([kind, label]) => `<label class="game-style-card"><input class="game-style-radio" type="radio" name="kind" value="${kind}" required ${kind === selectedKind ? 'checked' : ''}><span class="game-style-picture">${gameStyleIllustration(kind)}</span><span class="game-style-name">${label}</span></label>`).join('')}</div></fieldset><div class="together-player-fields">${[0, 1].map(index => `<div class="form-field"><label for="together-name-${index}">Player ${index + 1}</label><input id="together-name-${index}" name="name${index}" maxlength="40" required autocomplete="off" value="${esc(names[index])}" placeholder="${index ? 'Gran' : 'Alex'}"></div>`).join('')}</div><p class="form-error" id="together-setup-error" role="alert"></p><div class="form-actions">${button('Cancel', 'close-dialog', 'ghost')}<button class="button primary" type="submit">Next ${icon('arrow')}</button></div></form>`, { initialFocus: '.game-style-radio' });
 }
 function randomActivityForKind(kind) {
   const options = ACTIVITIES.filter(activity => activity.kind === kind);
@@ -189,6 +242,15 @@ function randomActivityForKind(kind) {
   const fresh = options.filter(activity => !played.has(activity.id));
   const pool = fresh.length ? fresh : options;
   return pool[Math.floor(Math.random() * pool.length)];
+}
+function beginTogetherActivity(kind, names) {
+  const activity = randomActivityForKind(kind);
+  const dailyThemeDate = activity.id === getDailyTheme(state).id ? getDateKey() : null;
+  session = { ...createTogetherSession({ id: sessionId(), activityId: activity.id, names, startedAt: null, dailyThemeDate }), started: false };
+  session.promptOrder = shuffledPromptOrder(session.activity);
+  const lastPair = { names: session.participants.map(participant => participant.name), kind };
+  savePreferences({ lastPair });
+  showTogetherInstructions();
 }
 function togetherScene(activity) {
   return `<svg class="together-scene" viewBox="0 0 600 230" role="img" aria-label="A grandparent and child sharing ${esc(activity.title)} on one device" xmlns="http://www.w3.org/2000/svg">
@@ -234,7 +296,11 @@ function renderTogetherSession() {
   const q = quiz ? a.questions[session.step] : null;
   const currentName = session.participants[session.turn].name;
   const activityTip = a.kind === 'collaborative' ? 'Add one sentence or idea, then pass the turn so your partner can continue the story.' : a.kind === 'choice' ? 'Choose a side, then explain your reasons. There are no wrong choices.' : a.kind === 'random' ? 'A surprise prompt is up. Follow the conversation wherever it leads.' : a.kind === 'reflection' ? 'Compare what was different then with what feels familiar today.' : 'Tell your story while the other person listens. Tap “I’m done” when you’re ready to pass the turn.';
-  showDialog(`${dialogHeading('FACE TO FACE · ON THIS DEVICE', esc(a.title))}<div class="participant-badges">${session.participants.map((participant, index) => `<div class="participant-badge ${!session.revealed && session.turn === index ? 'active' : ''}"><span class="mini-avatar" aria-hidden="true">${esc(initials(participant.name))}</span><span class="participant-name">Player ${index + 1} · ${esc(participant.name)}</span></div>`).join('')}</div><div class="activity-panel"><div class="question-count"><span>${quiz ? 'QUESTION' : a.kind === 'random' ? 'SURPRISE PROMPT' : a.kind === 'choice' ? 'CHOOSE & SHARE' : a.kind === 'collaborative' ? 'STORY BEAT' : a.kind === 'reflection' ? 'THEN & NOW' : 'CONVERSATION STARTER'} ${session.step + 1} OF ${total}</span><span>${esc(a.icon)}</span></div><div class="progress-track" role="progressbar" aria-label="Shared activity progress" aria-valuemin="0" aria-valuemax="${total * 2}" aria-valuenow="${session.step * 2 + (session.revealed ? 2 : session.turn)}"><div class="progress-fill" style="width:${(session.step * 2 + (session.revealed ? 2 : session.turn)) / (total * 2) * 100}%"></div></div><p class="turn-label" role="status">${session.revealed ? 'Both answers are in. Let’s see!' : `${esc(currentName)}, it’s your turn.`}</p><h3 class="prompt-text" tabindex="-1">${esc(quiz ? q.question : promptFor(session, session.step))}</h3>${quiz ? `<div class="quiz-options">${q.answers.map((answer, index) => `<button type="button" class="quiz-option ${session.revealed && index === q.correct ? 'correct' : ''}" data-action="together-answer" data-index="${index}" ${session.revealed ? 'disabled' : ''}><span class="answer-letter">${String.fromCharCode(65 + index)}</span>${esc(answer)}${session.revealed && index === q.correct ? icon('check') : ''}</button>`).join('')}</div>${session.revealed ? `<div class="answer-feedback" role="status"><strong>Correct answer: ${esc(q.answers[q.correct])}</strong><p>${esc(q.explanation)}</p><div class="together-scores">${session.participants.map((participant, index) => `<p class="player-result"><strong>${esc(participant.name)}</strong>: ${esc(q.answers[session.answers[index][session.step]])} · ${session.answers[index][session.step] === q.correct ? 'Correct!' : 'A little something learned.'}</p>`).join('')}</div></div>` : `<p class="field-help">${session.turn === 1 ? 'Player 1’s answer is hidden until you choose. Pass the device and make your own pick.' : 'Choose your answer, then pass the device to player 2. Answers are revealed after both choices.'}</p>`}` : `<div class="conversation-tip"><span aria-hidden="true">✦</span><p>${activityTip}</p></div>`}<div class="session-footer">${button(quiz ? session.step === total - 1 ? 'Finish & earn points' : 'Next question' : session.turn === 0 ? 'Pass the turn' : session.step === total - 1 ? 'Finish & earn points' : 'Next prompt', 'together-next', 'primary', quiz && !session.revealed ? 'disabled' : '')}</div></div>`, { wide: true, initialFocus: '.prompt-text' });
+  const answerWasSkipped = quiz && session.revealed && session.answers.every(answers => answers[session.step] === null);
+  const readButton = speechAvailable() ? `${button('🔊 Read aloud', 'speak-prompt', 'secondary small')}${button('Stop reading', 'stop-reading', 'ghost small')}` : '';
+  const answersMarkup = quiz ? `<div class="quiz-options">${q.answers.map((answer, index) => `<button type="button" class="quiz-option ${session.revealed && index === q.correct ? 'correct' : ''}" data-action="together-answer" data-index="${index}" ${session.revealed ? 'disabled' : ''}><span class="answer-letter">${String.fromCharCode(65 + index)}</span>${esc(answer)}${session.revealed && index === q.correct ? icon('check') : ''}</button>`).join('')}</div>${session.revealed ? `<div class="answer-feedback" role="status"><strong>${answerWasSkipped ? `Skipped together. The answer is ${esc(q.answers[q.correct])}.` : `Correct answer: ${esc(q.answers[q.correct])}`}</strong><p>${esc(q.explanation)}</p><div class="together-scores">${session.participants.map((participant, index) => { const answer = session.answers[index][session.step]; return `<p class="player-result"><strong>${esc(participant.name)}</strong>: ${answer === null ? 'Skipped' : `${esc(q.answers[answer])} · ${answer === q.correct ? 'Correct!' : 'A little something learned.'}`}</p>`; }).join('')}</div></div>` : `<p class="field-help">${session.turn === 1 ? 'Player 1’s answer is hidden until you choose. Pass the device and make your own pick.' : 'Choose your answer, then pass the device to player 2. Answers are revealed after both choices.'}</p>`}` : `<div class="conversation-tip"><span aria-hidden="true">✦</span><p>${activityTip}</p></div>`;
+  showDialog(`${dialogHeading('FACE TO FACE · ON THIS DEVICE', esc(a.title))}<div class="participant-badges">${session.participants.map((participant, index) => `<div class="participant-badge ${!session.revealed && session.turn === index ? 'active' : ''}"><span class="mini-avatar" aria-hidden="true">${esc(initials(participant.name))}</span><span class="participant-name">Player ${index + 1} · ${esc(participant.name)}</span></div>`).join('')}</div><div class="activity-panel"><div class="session-audio-controls">${readButton}</div><div class="question-count"><span>${quiz ? 'QUESTION' : a.kind === 'random' ? 'SURPRISE PROMPT' : a.kind === 'choice' ? 'CHOOSE & SHARE' : a.kind === 'collaborative' ? 'STORY BEAT' : a.kind === 'reflection' ? 'THEN & NOW' : 'CONVERSATION STARTER'} ${session.step + 1} OF ${total}</span><span>${esc(a.icon)}</span></div><div class="progress-track" role="progressbar" aria-label="Shared activity progress" aria-valuemin="0" aria-valuemax="${total * 2}" aria-valuenow="${session.step * 2 + (session.revealed ? 2 : session.turn)}"><div class="progress-fill" style="width:${(session.step * 2 + (session.revealed ? 2 : session.turn)) / (total * 2) * 100}%"></div></div><p class="turn-label" role="status">${session.revealed ? answerWasSkipped ? 'Skipped together. Keep going when you are ready.' : 'Both answers are in. Let’s see!' : `${esc(currentName)}, it’s your turn.`}</p><h3 class="prompt-text" tabindex="-1">${esc(quiz ? q.question : promptFor(session, session.step))}</h3>${answersMarkup}<div class="session-footer">${!session.revealed ? button(quiz ? 'Skip this question' : 'Skip this prompt', 'together-skip', 'secondary') : ''}${button(quiz ? session.step === total - 1 ? 'Finish & earn points' : 'Next question' : session.turn === 0 ? 'Pass the turn' : session.step === total - 1 ? 'Finish & earn points' : 'Next prompt', 'together-next', 'primary', quiz && !session.revealed ? 'disabled' : '')}</div></div>`, { wide: true, initialFocus: '.prompt-text' });
+  if (preferences.autoRead) speak(speechTextForSession());
 }
 function renderTogetherHistory(review) {
   const a = ACTIVITIES.find(item => item.id === review.activityId);
@@ -248,13 +314,13 @@ function completeTogetherMission() {
   const activity = completed.activity;
   const names = completed.participants.map(participant => participant.name);
   const scoreLine = activity.kind === 'quiz'
-    ? `<p class="celebration-score">${completed.participants.map((participant, index) => `${esc(participant.name)}: ${completed.answers[index].filter((value, question) => value === activity.questions[question].correct).length}/${activity.questions.length}`).join(' · ')}</p>`
+    ? `<p class="celebration-score">${completed.participants.map((participant, index) => { const answers = completed.answers[index]; const correct = answers.filter((value, question) => value === activity.questions[question].correct).length; const skipped = answers.filter(value => value === null).length; return `${esc(participant.name)}: ${correct}/${activity.questions.length} correct${skipped ? ` · ${skipped} skipped` : ''}`; }).join(' · ')}</p>`
     : '';
   commit(completeTogetherSession(state, completed));
   const streak = getJourneyStats(state).currentStreak;
   session = null;
   render();
-  showDialog(`<div class="celebration" role="status" aria-live="polite"><div class="celebration-confetti" aria-hidden="true"><span>✨</span><span>🎉</span><span>🌟</span><span>🎊</span><span>🌼</span><span>🎉</span><span>✨</span></div><p class="eyebrow">MISSION COMPLETE</p><h2 id="dialog-title">You did it together!</h2><div class="celebration-emojis" aria-hidden="true"><span>🎉</span><span>🏆</span><span>🌟</span></div><div class="points-reward"><span>+30</span><strong>POINTS EARNED!</strong></div><p class="celebration-names">${names.map(esc).join(' &amp; ')}</p>${scoreLine}<p class="celebration-message">${finishedDailyTheme ? `Daily theme complete! Congratulations${streak ? ` — your shared streak is ${streak} ${streak === 1 ? 'day' : 'days'}` : ''}.` : 'Every story, answer, and laugh counts. Your shared points are ready!'}</p>${button('Hooray! Keep going', 'close-dialog', 'primary celebration-dismiss')}</div>`, { className: 'celebration-modal', initialFocus: '.celebration-dismiss' });
+  showDialog(`<div class="celebration" role="status" aria-live="polite"><div class="celebration-confetti" aria-hidden="true"><span>✨</span><span>🎉</span><span>🌟</span><span>🎊</span><span>🌼</span><span>🎉</span><span>✨</span></div><p class="eyebrow">MISSION COMPLETE</p><h2 id="dialog-title">You did it together!</h2><div class="celebration-emojis" aria-hidden="true"><span>🎉</span><span>🏆</span><span>🌟</span></div><div class="points-reward"><span>+30</span><strong>POINTS EARNED!</strong></div><p class="celebration-names">${names.map(esc).join(' &amp; ')}</p>${scoreLine}<p class="celebration-message">${finishedDailyTheme ? `Daily theme complete! Congratulations${streak ? ` — your shared streak is ${streak} ${streak === 1 ? 'day' : 'days'}` : ''}.` : 'Every story, answer, and laugh counts. Your shared points are ready!'}</p>${button('Play again with this pair', 'quick-pair-play', 'secondary')}${button('Hooray! Keep going', 'close-dialog', 'primary celebration-dismiss')}</div>`, { className: 'celebration-modal', initialFocus: '.celebration-dismiss' });
 }
 
 function startActivity(activityId, personId = null) {
@@ -278,9 +344,15 @@ function renderSession() {
   const partner = person(session.personId);
   const selected = session.answers[session.step];
   const soloTip = a.kind === 'collaborative' ? 'Take turns adding one idea each. You can share this device and build the story together.' : a.kind === 'choice' ? 'Pick the option you like best, then share why. There are no wrong choices.' : a.kind === 'random' ? 'Try the surprise prompt and follow your curiosity.' : a.kind === 'reflection' ? 'Think about what has changed and what has stayed the same.' : 'Take turns. Ask “why?” or “what happened next?” There’s no right answer, just a story to share.';
-  showDialog(`${dialogHeading(partner ? 'SIMULATED CONNECTION · NO LIVE CALL' : 'A SHARED ACTIVITY · ON THIS DEVICE', esc(a.title))}<div class="session-layout"><aside class="call-stage"><div class="stage-avatar">${partner ? esc(partner.initials) : esc(initials(state.profile.name))}</div><h3>${partner ? esc(partner.name) : 'Your moment together'}</h3><p class="stage-caption">${partner ? 'Fictional demo companion' : isFamily() ? 'Share this device with family' : 'Play solo or with someone beside you'}</p><span class="demo-badge">${partner ? 'Simulated connection' : 'At your own pace'}</span><p class="field-help">Camera and microphone are not used.</p></aside><div class="activity-panel"><div class="question-count"><span>${quiz ? 'QUESTION' : a.kind === 'random' ? 'SURPRISE PROMPT' : a.kind === 'choice' ? 'CHOOSE & SHARE' : a.kind === 'collaborative' ? 'STORY BEAT' : a.kind === 'reflection' ? 'THEN & NOW' : 'CONVERSATION STARTER'} ${session.step + 1} OF ${total}</span><span>${esc(a.icon)}</span></div><div class="progress-track" role="progressbar" aria-label="Activity progress" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${session.step}"><div class="progress-fill" style="width:${session.step / total * 100}%"></div></div><h3 class="prompt-text">${esc(quiz ? q.question : promptFor(session, session.step))}</h3>${quiz ? `<div class="quiz-options">${q.answers.map((answer, index) => `<button type="button" class="quiz-option ${session.revealed && index === q.correct ? 'correct' : ''} ${session.revealed && selected === index && index !== q.correct ? 'incorrect' : ''} ${selected === index ? 'selected' : ''}" data-action="quiz-answer" data-index="${index}" ${session.revealed ? 'disabled' : ''}><span class="answer-letter">${String.fromCharCode(65 + index)}</span>${esc(answer)}${session.revealed && index === q.correct ? icon('check') : ''}</button>`).join('')}</div>${session.revealed ? `<div class="answer-feedback" role="status"><strong>${selected === q.correct ? 'You got it!' : 'A little something new to learn.'}</strong><p>${esc(q.explanation)}</p></div>` : '<p class="field-help">Choose an answer. A little curiosity is all you need.</p>'}` : `<div class="conversation-tip"><span aria-hidden="true">✦</span><p>${soloTip}</p></div>`}<div class="session-footer"><span class="field-help">${quiz ? 'Learning something new counts, too.' : 'Take as long as you like.'}</span>${button(session.step === total - 1 ? 'Finish & reflect' : quiz ? 'Next question' : 'Next prompt', 'session-next', 'primary', quiz && !session.revealed ? 'disabled' : '')}</div></div></div>`, { wide: true, initialFocus: '.prompt-text' });
+  const readControls = speechAvailable() ? `<div class="session-audio-controls">${button('🔊 Read aloud', 'speak-prompt', 'secondary small')}${button('Stop reading', 'stop-reading', 'ghost small')}</div>` : '';
+  const questionBody = quiz
+    ? `<div class="quiz-options">${q.answers.map((answer, index) => `<button type="button" class="quiz-option ${session.revealed && index === q.correct ? 'correct' : ''} ${session.revealed && selected === index && index !== q.correct ? 'incorrect' : ''} ${selected === index ? 'selected' : ''}" data-action="quiz-answer" data-index="${index}" ${session.revealed ? 'disabled' : ''}><span class="answer-letter">${String.fromCharCode(65 + index)}</span>${esc(answer)}${session.revealed && index === q.correct ? icon('check') : ''}</button>`).join('')}</div>${session.revealed ? `<div class="answer-feedback" role="status"><strong>${selected === q.correct ? 'You got it!' : 'A little something new to learn.'}</strong><p>${esc(q.explanation)}</p></div>` : '<p class="field-help">Choose an answer. A little curiosity is all you need.</p>'}`
+    : `<div class="conversation-tip"><span aria-hidden="true">✦</span><p>${soloTip}</p></div>`;
+  const canSkip = !quiz || !session.revealed;
+  showDialog(`${dialogHeading(partner ? 'SIMULATED CONNECTION · NO LIVE CALL' : 'A SHARED ACTIVITY · ON THIS DEVICE', esc(a.title))}<div class="session-layout"><aside class="call-stage"><div class="stage-avatar">${partner ? esc(partner.initials) : esc(initials(state.profile.name))}</div><h3>${partner ? esc(partner.name) : 'Your moment together'}</h3><p class="stage-caption">${partner ? 'Fictional demo companion' : isFamily() ? 'Share this device with family' : 'Play solo or with someone beside you'}</p><span class="demo-badge">${partner ? 'Simulated connection' : 'At your own pace'}</span><p class="field-help">Camera and microphone are not used.</p></aside><div class="activity-panel">${readControls}<div class="question-count"><span>${quiz ? 'QUESTION' : a.kind === 'random' ? 'SURPRISE PROMPT' : a.kind === 'choice' ? 'CHOOSE & SHARE' : a.kind === 'collaborative' ? 'STORY BEAT' : a.kind === 'reflection' ? 'THEN & NOW' : 'CONVERSATION STARTER'} ${session.step + 1} OF ${total}</span><span>${esc(a.icon)}</span></div><div class="progress-track" role="progressbar" aria-label="Activity progress" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${session.step}"><div class="progress-fill" style="width:${session.step / total * 100}%"></div></div><h3 class="prompt-text">${esc(quiz ? q.question : promptFor(session, session.step))}</h3>${questionBody}<div class="session-footer"><span class="field-help">${quiz ? 'Learning something new counts, too.' : 'Take as long as you like.'}</span>${canSkip ? button(quiz ? 'Skip this question' : 'Skip this prompt', 'session-skip', 'secondary') : ''}${button(session.step === total - 1 ? 'Finish & reflect' : quiz ? 'Next question' : 'Next prompt', 'session-next', 'primary', quiz && !session.revealed ? 'disabled' : '')}</div></div></div>`, { wide: true, initialFocus: '.prompt-text' });
   dialogRoot.querySelector('.prompt-text').setAttribute('tabindex', '-1');
   dialogRoot.querySelector('.prompt-text').focus();
+  if (preferences.autoRead) speak(speechTextForSession());
 }
 function showReview() {
   const a = session.activity;
@@ -293,6 +365,7 @@ function showQuit() {
   showDialog(`${dialogHeading('TAKE YOUR TIME', 'Leave this activity?')}<p class="muted">${pointsMessage}</p><div class="form-actions">${button('Keep going', 'session-resume', 'primary')}${button('Leave activity', 'session-quit', 'ghost danger')}</div>`);
 }
 function handleClose() {
+  if (speechAvailable()) globalThis.speechSynthesis.cancel();
   if (session?.started) showQuit();
   else { session = null; closeDialog(); }
 }
@@ -311,22 +384,37 @@ async function action(target) {
   if (name === 'navigate') navigate(target.dataset.page);
   else if (['discover', 'activities', 'circle', 'rewards'].includes(name)) navigate(name);
   else if (name === 'profile') showProfile();
+  else if (name === 'display-settings') showDisplaySettings();
+  else if (name === 'text-size') { savePreferences({ textSize: target.dataset.size }); showDisplaySettings(); }
+  else if (name === 'test-read-aloud') speak('This is a reading test. Questions and prompts can be read aloud.');
+  else if (name === 'speak-prompt') speak(speechTextForSession());
+  else if (name === 'stop-reading') { if (speechAvailable()) globalThis.speechSynthesis.cancel(); }
   else if (name === 'close-dialog') handleClose();
   else if (name === 'scroll-matches') { const details = document.querySelector('#community-details'); if (details) details.open = true; document.querySelector('#matches')?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' }); document.querySelector('#matches button')?.focus({ preventScroll: true }); }
   else if (name === 'connect') startActivity(getSuggestedActivity(state, id).id, id);
   else if (name === 'start-activity') startActivity(id);
   else if (name === 'together-setup') showTogetherSetup(id);
   else if (name === 'together-mode') showTogetherSetup('', target.dataset.kind);
+  else if (name === 'quick-pair-play') { if (preferences.lastPair) beginTogetherActivity(preferences.lastPair.kind, preferences.lastPair.names); }
+  else if (name === 'forget-pair') { savePreferences({ lastPair: null }); showTogetherSetup('', target.dataset.kind); }
   else if (name === 'start-random-activity') startActivity(randomActivityForKind(target.dataset.kind).id);
   else if (name === 'trusted-preview') showTrustedPreview();
   else if (name === 'community-preview') { navigate('discover'); closeDialog(); await action({ dataset: { action: 'scroll-matches' } }); }
   else if (name === 'together-answer') { session = answerTogetherQuestion(session, Number(target.dataset.index)); renderSession(); }
+  else if (name === 'together-skip') { session = skipTogetherStep(session); if (session.finished) completeTogetherMission(); else renderSession(); }
   else if (name === 'together-next') { session = advanceTogetherSession(session); if (session.finished) completeTogetherMission(); else renderSession(); }
   else if (name === 'session-start') { session.started = true; session.startedAt = Date.now(); renderSession(); }
   else if (name === 'quiz-answer') { if (!session || session.mode === 'in-person' || session.revealed) return; session.answers[session.step] = Number(target.dataset.index); session.revealed = true; renderSession(); }
   else if (name === 'session-next') {
     if (!session || session.mode === 'in-person' || (session.activity.kind === 'quiz' && !session.revealed)) return;
     const total = session.activity.kind === 'quiz' ? session.activity.questions.length : promptCount(session);
+    if (session.step + 1 === total) { session.finished = true; showReview(); }
+    else { session.step++; session.revealed = false; renderSession(); }
+  }
+  else if (name === 'session-skip') {
+    if (!session || session.mode === 'in-person') return;
+    const total = session.activity.kind === 'quiz' ? session.activity.questions.length : promptCount(session);
+    if (session.activity.kind === 'quiz') session.answers[session.step] = null;
     if (session.step + 1 === total) { session.finished = true; showReview(); }
     else { session.step++; session.revealed = false; renderSession(); }
   }
@@ -342,11 +430,11 @@ async function action(target) {
     showDialog(`${dialogHeading('A LITTLE THANK YOU', 'Redeem a sample reward?')}<div class="session-intro"><span class="icon-tile">${esc(reward.icon)}</span><h3>${esc(reward.name)}</h3><p>${reward.cost} kindness points</p></div><p class="notice">This creates a demo voucher with no monetary value. It cannot be used at a real business.</p><div class="form-actions">${button('Keep my points', 'close-dialog', 'ghost')}${button('Redeem sample voucher', 'redeem-confirm', 'primary', `data-id="${esc(id)}"`)}</div>`);
   }
   else if (name === 'redeem-confirm') { commit(redeemReward(state, id)); render(); closeDialog(); notify('Your sample voucher is ready. Find it below your rewards.'); }
-  else if (name === 'reset-confirm') showDialog(`${dialogHeading('START FRESH', 'Reset your demo?')}<p class="muted">This will remove your profile, points, saved connections, group choices, reviews, and sample vouchers from this browser.</p><div class="form-actions">${button('Keep my data', 'profile', 'secondary')}${button('Reset all demo data', 'reset', 'danger primary')}</div>`);
+  else if (name === 'reset-confirm') showDialog(`${dialogHeading('START FRESH', 'Reset your demo?')}<p class="muted">This will remove your profile, points, saved player names, connections, group choices, reviews, and sample vouchers from this browser.</p><div class="form-actions">${button('Keep my data', 'profile', 'secondary')}${button('Reset all demo data', 'reset', 'danger primary')}</div>`);
   else if (name === 'reset') {
     let removed = false;
     try { localStorage.removeItem(STORAGE_KEY); removed = true; } catch { /* Storage may be blocked. */ }
-    commit(createState()); session = null; navigate('discover'); closeDialog();
+    commit(createState()); savePreferences({ lastPair: null }); session = null; navigate('discover'); closeDialog();
     notify(removed || storageAvailable ? 'Your demo has been reset. A fresh start awaits.' : 'This visit has been reset, but saved browser data could not be removed and may return on reload. Clear this site’s data in your browser settings to remove it.');
   }
 }
@@ -357,6 +445,7 @@ document.addEventListener('click', event => {
 });
 document.addEventListener('change', event => {
   if (event.target.matches('.interest-check')) event.target.closest('.choice').classList.toggle('selected', event.target.checked);
+  if (event.target.matches('#auto-read-toggle')) savePreferences({ autoRead: event.target.checked });
 });
 document.addEventListener('submit', event => {
   if (event.target.id === 'together-setup-form') {
@@ -369,6 +458,7 @@ document.addEventListener('submit', event => {
       const dailyThemeDate = activity.id === getDailyTheme(state).id ? getDateKey() : null;
       session = { ...createTogetherSession({ id: sessionId(), activityId: activity.id, names: [form.get('name0'), form.get('name1')], startedAt: null, dailyThemeDate }), started: false };
       session.promptOrder = shuffledPromptOrder(session.activity);
+      savePreferences({ lastPair: { names: session.participants.map(participant => participant.name), kind } });
       showTogetherInstructions();
     } catch (error) { document.querySelector('#together-setup-error').textContent = error.message; }
   }
