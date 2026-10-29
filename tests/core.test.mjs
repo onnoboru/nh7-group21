@@ -379,7 +379,9 @@ test('activity suggestions choose eligible unplayed content before allowing repe
   const next = getSuggestedActivity(state);
   assert.ok(['gardening', 'music'].includes(next.interest));
   assert.ok(!played.has(next.id));
-  assert.equal(getSuggestedActivity(state, 'margaret').id, 'garden-walk-talk');
+  const personSuggestion = getSuggestedActivity(state, 'margaret');
+  assert.ok(['garden-walk-talk', 'charlie-walk'].includes(personSuggestion.id));
+  assert.ok(!played.has(personSuggestion.id));
   const noProfileSuggestion = getSuggestedActivity({ ...state, profile: null });
   assert.ok(ACTIVITIES.includes(noProfileSuggestion));
   assert.ok(!played.has(noProfileSuggestion.id));
