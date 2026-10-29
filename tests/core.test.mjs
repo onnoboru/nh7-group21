@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ACTIVITIES, GROUPS, INTERESTS, PEOPLE, REWARDS, STORAGE_KEY, createState, setProfile, getMode, getMatches, getRecommendedGroups, getSuggestedActivity, completeSession, createTogetherSession, answerTogetherQuestion, advanceTogetherSession, skipTogetherStep, completeTogetherSession, joinGroup, redeemReward, saveState, loadState } from '../dist/core.js';
+import { ACTIVITIES, GROUPS, INTERESTS, PEOPLE, REWARDS, PET_QUESTIONS, STORAGE_KEY, createState, setProfile, getMode, getMatches, getRecommendedGroups, getSuggestedActivity, getPetStats, getPetWeek, getWeekStartKey, feedPet, askPetQuestion, replyToPetQuestion, completeSession, createTogetherSession, answerTogetherQuestion, advanceTogetherSession, skipTogetherStep, completeTogetherSession, joinGroup, redeemReward, saveState, loadState } from '../dist/core.js';
 
 const profile = (age = 20, interests = ['gardening'], guardianConsent = false) => setProfile(createState(), { name: ' Alex ', age, interests, guardianConsent });
 const session = (state, id = 'session-1', changes = {}) => completeSession(state, { id, personId: null, activityId: 'garden-quiz', rating: 5, note: ' Lovely! ', addFriend: false, ...changes });
@@ -24,6 +24,48 @@ test('family mode applies at the correct age and consent boundaries', () => {
   for (const [age, consent, expected] of [[6, true, 'family'], [11, true, 'family'], [12, false, 'family'], [12, true, 'community'], [17, false, 'family'], [17, true, 'community'], [18, false, 'community'], [110, false, 'community']]) {
     assert.equal(getMode(profile(age, ['art'], consent).profile), expected);
   }
+});
+
+test('every completed activity style feeds Charlie’s growth, with daily care and stories adding more', () => {
+  const initial = freeze(createState());
+  assert.equal(getPetStats(initial).experience, 0);
+  const firstGame = completeTogetherSession(initial, finishTogether('garden-quiz'), bothReviews);
+  assert.equal(getPetStats(firstGame).gameExperience, 10);
+  assert.equal(getPetStats(firstGame).experience, 10);
+
+  const familyGame = completeTogetherSession(firstGame, finishTogether('family-recipes', 'together-2'), bothReviews);
+  assert.equal(getPetStats(familyGame).experience, 20);
+  const communityGame = session(setProfile(familyGame, { name: 'Alex', age: 20, interests: ['gardening'] }), 'community-3', { activityId: 'garden-walk-talk' });
+  assert.equal(getPetStats(communityGame).gameExperience, 30);
+  assert.equal(getPetStats(communityGame).experience, 30);
+  assert.equal(getPetStats(communityGame).level, 1);
+  assert.deepEqual(initial.petJourney, { fedDates: [], weeks: [] });
+
+  const fed = feedPet(communityGame, '2026-10-19');
+  assert.equal(getPetStats(fed, new Date(2026, 9, 19)).experience, 33);
+  assert.equal(feedPet(fed, '2026-10-19'), fed);
+  assert.throws(() => feedPet(fed, '2026-02-31'), /valid day/);
+});
+
+test('weekly pet questions accept a local text or voice story and award growth once', () => {
+  const monday = new Date(2026, 9, 19);
+  const thursday = new Date(2026, 9, 22);
+  assert.equal(getWeekStartKey(thursday), '2026-10-19');
+  const question = PET_QUESTIONS[0];
+  const asked = askPetQuestion(createState(), { weekStart: '2026-10-19', questionId: question.id, askedAt: 1000 });
+  assert.equal(getPetWeek(asked, thursday).questionId, question.id);
+  assert.equal(askPetQuestion(asked, { weekStart: '2026-10-19', questionId: PET_QUESTIONS[1].id, askedAt: 2000 }), asked);
+  assert.equal(getPetStats(asked, monday).experience, 0);
+  assert.throws(() => replyToPetQuestion(asked, { weekStart: '2026-10-19', repliedAt: 1500 }), /short story or record/);
+
+  const replied = replyToPetQuestion(asked, { weekStart: '2026-10-19', replyText: 'We played five stones after school.', repliedAt: 3000 });
+  assert.equal(getPetStats(replied, thursday).experience, 15);
+  assert.equal(getPetStats(replied, thursday).answeredWeeks, 1);
+  assert.equal(replied.petJourney.weeks[0].replyText, 'We played five stones after school.');
+  const voiceOnly = replyToPetQuestion(asked, { weekStart: '2026-10-19', voiceNoteId: 'voice-12345678', repliedAt: 3000 });
+  assert.equal(getPetStats(voiceOnly, thursday).experience, 15);
+  assert.throws(() => replyToPetQuestion(asked, { weekStart: '2026-10-19', voiceNoteId: 'bad-id', repliedAt: 3000 }), /valid voice story/);
+  assert.throws(() => replyToPetQuestion(asked, { weekStart: '2026-10-26', replyText: 'Hello', repliedAt: 3000 }), /ask the weekly question/);
 });
 
 test('matching requires overlapping interests, opposite generation, and community mode', () => {
@@ -121,7 +163,7 @@ test('saved state round-trips complete history and survives profile changes', ()
 
 test('malformed, inconsistent, and unsupported persisted data resets safely', () => {
   const valid = session(profile());
-  for (const value of [null, [], {}, { ...valid, version: 2 }, { ...valid, profile: { ...valid.profile, age: '20' } }, { ...valid, points: -1 }, { ...valid, points: 999 }, { ...valid, friends: ['unknown'] }, { ...valid, joinedGroups: ['unknown'] }, { ...valid, reviews: [] }, { ...valid, completedSessions: ['session-1', 'session-1'] }, { ...valid, reviews: [{ ...valid.reviews[0], rating: 6 }] }, { ...valid, reviews: [{ ...valid.reviews[0], interest: 'music' }] }, { ...valid, redemptions: [{ id: 'voucher-1', rewardId: 'tea', cost: 0, code: 'fake' }] }]) {
+  for (const value of [null, [], {}, { ...valid, version: 3 }, { ...valid, profile: { ...valid.profile, age: '20' } }, { ...valid, points: -1 }, { ...valid, points: 999 }, { ...valid, friends: ['unknown'] }, { ...valid, joinedGroups: ['unknown'] }, { ...valid, reviews: [] }, { ...valid, completedSessions: ['session-1', 'session-1'] }, { ...valid, reviews: [{ ...valid.reviews[0], rating: 6 }] }, { ...valid, reviews: [{ ...valid.reviews[0], interest: 'music' }] }, { ...valid, redemptions: [{ id: 'voucher-1', rewardId: 'tea', cost: 0, code: 'fake' }] }]) {
     assert.deepEqual(loadState(storage(JSON.stringify(value))), createState());
   }
   assert.deepEqual(loadState(storage('{broken')), createState());
@@ -302,6 +344,14 @@ test('together histories and redeemed rewards persist without a profile; old dat
   const old = session(profile());
   assert.equal(saveState(old, target), true);
   assert.deepEqual(loadState(target), old);
+  const legacy = { ...old, version: 1 };
+  delete legacy.petJourney;
+  const migrated = loadState(storage(JSON.stringify(legacy)));
+  assert.equal(migrated.version, 2);
+  assert.deepEqual(migrated.petJourney, { fedDates: [], weeks: [] });
+  assert.deepEqual(migrated.reviews, old.reviews);
+  assert.equal(saveState(legacy, target), true);
+  assert.equal(loadState(target).version, 2);
   const mixed = completeTogetherSession(old, finishTogether(), bothReviews);
   assert.equal(saveState(mixed, target), true);
   assert.deepEqual(loadState(target), mixed);

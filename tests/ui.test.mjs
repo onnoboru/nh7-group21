@@ -8,7 +8,8 @@ import * as core from '../dist/core.js';
 // transitions. It does not validate browser layout, keyboard focus, or HTML APIs.
 // Replace only the ESM import so dependencies can be injected into an isolated VM.
 const source = readFileSync(new URL('../dist/app.js', import.meta.url), 'utf8')
-  .replace(/^import \{[\s\S]*?\} from '\.\/core\.js';/, '');
+  .replace(/^import \{[\s\S]*?\} from '\.\/core\.js';/m, '')
+  .replace(/^import \{[\s\S]*?\} from '\.\/local-audio\.js';/m, '');
 
 function harness({ initial = null, initialPreferences = null, blocked = false } = {}) {
   const handlers = {};
@@ -16,6 +17,7 @@ function harness({ initial = null, initialPreferences = null, blocked = false } 
   const saved = new Map(initial ? [[core.STORAGE_KEY, JSON.stringify(initial)]] : []);
   if (initialPreferences) saved.set('kindred-local-preferences-v1', JSON.stringify(initialPreferences));
   const speechCalls = [];
+  const voiceNotes = new Map();
   class TestSpeechSynthesisUtterance { constructor(text) { this.text = text; } }
   const speechSynthesis = { cancel() {}, speak(utterance) { speechCalls.push(utterance.text); } };
   let document;
@@ -44,6 +46,11 @@ function harness({ initial = null, initialPreferences = null, blocked = false } 
   const location = { hash: '' };
   const context = createContext({
     ...core, document, location, localStorage: storage,
+    saveVoiceNote: async (id, blob) => { voiceNotes.set(id, blob); },
+    loadVoiceNote: async id => voiceNotes.get(id) || null,
+    deleteVoiceNote: async id => { voiceNotes.delete(id); },
+    clearVoiceNotes: async () => { voiceNotes.clear(); },
+    canRecordVoiceNote: () => false,
     SpeechSynthesisUtterance: TestSpeechSynthesisUtterance, speechSynthesis,
     loadState: () => core.loadState(storage), saveState: state => core.saveState(state, storage),
     window: { scrollTo() {}, addEventListener() {} },
@@ -68,7 +75,8 @@ function harness({ initial = null, initialPreferences = null, blocked = false } 
     change(id, checked) { handlers.change({ target: { matches: selector => selector === `#${id}`, checked } }); },
     input(id, data) { handlers.input({ target: { form: { id, data } } }); },
     stored: () => core.loadState(storage),
-    submit(id, data, dataset = {}) { handlers.submit({ preventDefault() {}, target: { id, data, dataset } }); },
+    async submit(id, data, dataset = {}) { await handlers.submit({ preventDefault() {}, target: { id, data, dataset } }); },
+    typePetReply(value) { handlers.input({ target: { matches: selector => selector === '#pet-reply-text', value } }); },
     async click(action, extras = {}) {
       const target = { disabled: false, dataset: { action, ...extras } };
       handlers.click({ target: { closest: selector => selector === '[data-action]' ? target : null } });
@@ -112,6 +120,8 @@ async function startTogether(ui, { kind = 'quiz', name0 = 'Alex', name1 = 'Gran'
   assert.equal(ui.session().started, false);
   assert.match(ui.dialog(), /HOW TO PLAY/);
   assert.match(ui.dialog(), /class="together-scene"/);
+  assert.match(ui.dialog(), /Charlie is your family’s virtual pet/);
+  assert.match(ui.dialog(), /class="charlie-mascot"/);
   await ui.click('session-start');
   assert.equal(ui.session().started, true);
   return ui.session();
@@ -238,7 +248,7 @@ test('blocked saving is disclosed, and failed reset warns that prior data may re
 
 test('two people can play a quiz without a profile, keep answers private until both answer, and save one shared mission', async () => {
   const ui = harness();
-  assert.match(ui.html(), /Play face to face/);
+  assert.match(ui.html(), /Play a game/);
   const session = await startTogether(ui, { kind: 'quiz', name0: '<b>Alex</b>', name1: 'Gran' });
   assert.equal(session.activity.kind, 'quiz');
   assert.equal(ui.state().profile, null);
@@ -267,6 +277,7 @@ test('two people can play a quiz without a profile, keep answers private until b
   }
   assert.equal(ui.session(), null);
   assert.match(ui.dialog(), /MISSION COMPLETE/);
+  assert.match(ui.dialog(), /class="charlie-mascot"/);
   assert.match(ui.dialog(), /\+30/);
   assert.equal(ui.state().points, 30);
   assert.equal(ui.state().profile, null);
@@ -379,23 +390,28 @@ test('face-to-face conversations need both turns and finish without a rating for
   assert.equal(ui.state().points, 30);
 });
 
-test('hybrid home distinguishes working together play from trusted-circle and community previews', async () => {
+test('pet home keeps the weekly family loop central and community previews secondary', async () => {
   const ui = harness();
-  assert.match(ui.html(), /Together now/);
-  assert.match(ui.html(), /Trusted circle/);
-  assert.match(ui.html(), /TODAY’S THEME/);
+  assert.match(ui.html(), /MEET YOUR FAMILY’S VIRTUAL PET/);
+  assert.match(ui.html(), />Charlie</);
+  assert.match(ui.html(), /See this week’s question/);
+  assert.match(ui.html(), /TODAY’S GAME/);
+  assert.match(ui.html(), /Every game helps Charlie grow/);
+  assert.doesNotMatch(ui.html(), /Save Charlie(?:’s|&#39;s) portrait/);
+  assert.doesNotMatch(ui.html(), /pet-portrait/);
+  assert.match(ui.html(), /data-page="characters"/);
+  assert.match(ui.html(), /Feed Charlie/);
   assert.match(ui.html(), /Community preview/);
-  assert.match(ui.html(), /Invitations and remote calls are not available yet/);
+  assert(!ui.html().includes('Together now'));
+  assert(!ui.html().includes('Trusted circle'));
   assert.match(ui.html(), /data-stat="moments">0</);
   assert.match(ui.html(), /data-stat="points">0</);
   assert(!ui.html().includes('data-stat="interests"'));
   await ui.click('together-mode', { kind: 'quiz' });
-  assert.match(ui.dialog(), /value="quiz" required checked/);
-  assert.match(ui.dialog(), /Guided Talk/);
-  assert.match(ui.dialog(), /Random Talk/);
-  assert.match(ui.dialog(), /Would You Rather/);
-  assert.match(ui.dialog(), /Story Game/);
-  assert.match(ui.dialog(), /Then & Now/);
+  assert.match(ui.dialog(), /GAME STYLE/);
+  assert.match(ui.dialog(), /<h3>Quiz<\/h3>/);
+  assert.doesNotMatch(ui.dialog(), /name="kind"/);
+  assert.doesNotMatch(ui.dialog(), /Guided Talk/);
   assert.match(ui.dialog(), /game-style-illustration/);
   await ui.click('close-dialog');
   await ui.click('trusted-preview');
@@ -409,6 +425,86 @@ test('hybrid home distinguishes working together play from trusted-circle and co
   assert.match(ui.dialog(), /Player 1/);
   assert.match(ui.dialog(), /Player 2/);
   assert.equal(ui.state().profile, null);
+});
+
+test('Characters tab explains Charlie and clearly labels the fictional story cast', async () => {
+  const ui = harness();
+  await ui.click('navigate', { page: 'characters' });
+  assert.match(ui.html(), /<h1 class="page-title">Characters<\/h1>/);
+  assert.match(ui.html(), /YOUR FAMILY’S VIRTUAL PET/);
+  assert.match(ui.html(), /Finish any game, care for Charlie, or share a family story/);
+  assert.match(ui.html(), /Story characters/);
+  assert.match(ui.html(), /Fictional demo profiles/);
+  assert.match(ui.html(), /not real people or live connections/);
+  for (const name of ['Margaret', 'Arthur', 'Mei', 'David', 'Ava', 'Leo', 'Sam', 'Nia']) {
+    assert.match(ui.html(), new RegExp(`<h3>${name}<\\/h3>`));
+  }
+});
+
+test('Play together keeps the chosen game style and daily theme without asking for another choice', async () => {
+  const ui = harness();
+  await ui.click('together-mode', { kind: 'conversation' });
+  assert.match(ui.dialog(), /Guided Talk/);
+  assert.match(ui.dialog(), /We’ll choose an unplayed activity at random/);
+  assert.match(ui.dialog(), /name="name0"[^>]*value="Alex"/);
+  assert.match(ui.dialog(), /name="name1"[^>]*value="Gran"/);
+  assert.doesNotMatch(ui.dialog(), /name="kind"/);
+  assert.doesNotMatch(ui.dialog(), /Choose a game\./);
+  await ui.submit('together-setup-form', { name0: 'Alex', name1: 'Gran' }, { kind: 'conversation' });
+  assert.equal(ui.session().activity.kind, 'conversation');
+
+  const dailyUi = harness();
+  const daily = core.getDailyTheme(dailyUi.state());
+  await dailyUi.click('together-setup', { id: daily.id });
+  assert.match(dailyUi.dialog(), /TODAY’S GAME/);
+  assert.ok(dailyUi.dialog().includes(daily.title));
+  assert.doesNotMatch(dailyUi.dialog(), /name="kind"/);
+  await dailyUi.submit('together-setup-form', { name0: 'Alex', name1: 'Gran' }, { pinned: daily.id, kind: daily.kind });
+  assert.equal(dailyUi.session().activity.id, daily.id);
+});
+
+test('local weekly pet story, printable book, and every face-to-face game grow Charlie', async () => {
+  const ui = harness();
+  assert.equal(core.getPetStats(ui.state()).experience, 0);
+  await ui.click('pet-feed');
+  assert.equal(core.getPetStats(ui.state()).experience, 3);
+  assert.match(ui.html(), /Fed today/);
+
+  await ui.click('pet-ask');
+  const weekStart = core.getWeekStartKey();
+  assert.match(ui.dialog(), /CHARLIE’S QUESTION/);
+  const activeWeek = core.getPetWeek(ui.state());
+  assert.ok(activeWeek?.questionId);
+  assert.match(ui.dialog(), /pass this device to a grandparent/);
+  await ui.click('pet-reply');
+  assert.match(ui.dialog(), /GRANDPARENT’S TURN/);
+  assert.match(ui.dialog(), /Voice recording is not available here/);
+  await ui.submit('pet-reply-form', { replyText: 'We played five stones after school.' }, { week: weekStart });
+  assert.equal(core.getPetStats(ui.state()).experience, 18);
+  assert.match(ui.dialog(), /Charlie learned something lovely/);
+  assert.match(ui.dialog(), /\+15 growth points/);
+  assert.equal(ui.stored().petJourney.weeks[0].replyText, 'We played five stones after school.');
+
+  await ui.click('close-dialog');
+  assert.match(ui.html(), /A family story to keep/);
+  await ui.click('pet-read-story');
+  assert.match(ui.dialog(), /We played five stones after school/);
+  await ui.click('close-dialog');
+  await ui.click('storybook');
+  assert.match(ui.html(), /Our month with Charlie/);
+  assert.match(ui.html(), /We played five stones after school/);
+  await ui.click('print-storybook');
+
+  await ui.click('navigate', { page: 'activities' });
+  for (const kind of ['quiz', 'conversation', 'random', 'choice', 'collaborative', 'reflection', 'walk']) {
+    const before = core.getPetStats(ui.state()).experience;
+    await startTogether(ui, { kind });
+    await finishTogether(ui);
+    assert.equal(core.getPetStats(ui.state()).experience, before + 10, `${kind} should give Charlie growth points`);
+    assert.match(ui.dialog(), /Charlie gained 10 growth points/);
+    await ui.click('close-dialog');
+  }
+  assert.equal(ui.state().reviews.length, 7);
 });
 
 test('shared journey reflects completed activities and game styles choose fresh content', async () => {

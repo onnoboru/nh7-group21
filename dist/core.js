@@ -35,6 +35,27 @@ export const REWARDS = [
   { id: 'book', name: 'Your next chapter', description: 'Sample bookshop voucher. Demo only; no cash value or real partner.', cost: 120, icon: '📚' },
 ];
 
+export const PET_QUESTIONS = [
+  { id: 'childhood-game', question: 'What game did you enjoy playing when you were a child?' },
+  { id: 'after-school-snack', question: 'What was a favourite snack after school?' },
+  { id: 'singapore-place', question: 'Which place in Singapore would you like Charlie to visit with us?' },
+  { id: 'family-song', question: 'What song makes you smile, and what do you like about it?' },
+  { id: 'teach-a-skill', question: 'What is something small you would enjoy teaching me?' },
+  { id: 'garden-idea', question: 'If Charlie had a little garden, what should we grow there?' },
+  { id: 'kindness-memory', question: 'What is a kind thing someone did that you still remember?' },
+  { id: 'local-food', question: 'What local food should Charlie try in our next story?' },
+  { id: 'family-tradition', question: 'What is a simple family tradition you enjoy?' },
+  { id: 'childhood-toy', question: 'What toy or object did you love when you were young?' },
+];
+
+export const PET_DECORATIONS = [
+  { id: 'sunny-window', name: 'Sunny window seat', icon: '🪟', unlockXp: 20 },
+  { id: 'leaf-lamp', name: 'Leafy reading lamp', icon: '💡', unlockXp: 50 },
+  { id: 'story-rug', name: 'Story-time rug', icon: '📚', unlockXp: 90 },
+  { id: 'orchid-pot', name: 'Orchid flowerpot', icon: '🌸', unlockXp: 140 },
+  { id: 'star-mobile', name: 'Starry night mobile', icon: '⭐', unlockXp: 200 },
+];
+
 export const ACTIVITIES = [
   {
     id: 'garden-quiz', title: 'A little green knowledge', interest: 'gardening', kind: 'quiz', description: 'Discover a few growing secrets, one friendly question at a time.', duration: '5 min', icon: '🌱',
@@ -77,6 +98,7 @@ export const ACTIVITIES = [
     { question: 'What is a popular way to explore the village paths on Pulau Ubin?', answers: ['By bicycle', 'By cable car', 'By underground train'], correct: 0, explanation: 'Visitors often explore Pulau Ubin by bicycle or on foot. Which part of the island would you like to see?' },
   ] },
   { id: 'garden-walk-talk', title: 'A walk through Singapore', interest: 'gardening', kind: 'conversation', description: 'Share favourite green spaces and small discoveries in nature.', duration: '8 min', icon: '🌳', prompts: ['Which park or garden would you show a visitor first?', 'What bird or butterfly have you noticed nearby?', 'Would you rather walk by the sea or under shady trees?', 'What plant reminds you of someone in your family?', 'Which Singapore garden would you like to explore next?', 'What is a peaceful place you enjoy returning to?'] },
+  { id: 'charlie-walk', title: 'Walk with Charlie', interest: 'gardening', kind: 'walk', description: 'Take a short, safe walk with an adult—or imagine one together. No GPS is used.', duration: '6 min', icon: '👟', prompts: ['Choose a familiar path or imagine one from home. What would you tell Charlie before setting off?', 'What colour, plant, bird, or building do you notice first?', 'Charlie hears a Singapore neighbourhood sound. What might it be?', 'Choose a shady place to pause. What story would you share there?', 'What would you like Charlie to notice on another walk?'] },
   { id: 'hawker-choices', title: 'Hawker favourites', interest: 'cooking', kind: 'choice', description: 'Pick a favourite and trade the stories behind it.', duration: '6 min', icon: '🍜', prompts: ['Would you choose kaya toast or roti prata for breakfast?', 'Would you share chicken rice or laksa with a visitor?', 'Would you try a new stall or return to your favourite?', 'Would you pick iced kopi or teh tarik on a warm day?', 'Would you rather order one big dish to share or several small bites?'] },
   { id: 'neighbourhood-story', title: 'Neighbourhood story makers', interest: 'stories', kind: 'collaborative', description: 'Imagine a friendly adventure set in a Singapore neighbourhood.', duration: '8 min', icon: '🏘️', prompts: ['Choose a character who knows every corner of the neighbourhood.', 'Set the story at a familiar market or hawker centre.', 'Add a sudden tropical rain shower.', 'Introduce a neighbour with a surprising talent.', 'Find a clue near a playground or community garden.', 'End the adventure with a shared meal.'] },
 ];
@@ -93,7 +115,7 @@ const isText = (value, max, min = 0) => typeof value === 'string' && value.lengt
 const unique = values => new Set(values).size === values.length;
 
 export function createState() {
-  return { version: 1, profile: null, points: 0, reviews: [], friends: [], joinedGroups: [], redemptions: [], completedSessions: [] };
+  return { version: 2, profile: null, points: 0, reviews: [], friends: [], joinedGroups: [], redemptions: [], completedSessions: [], petJourney: { fedDates: [], weeks: [] } };
 }
 
 function cleanProfile(value) {
@@ -177,6 +199,111 @@ export function getJourneyStats(state, date = new Date()) {
     previous = number;
   }
   return { currentStreak, longestStreak, totalDurationMs: state.reviews.filter(review => review.mode === 'in-person').reduce((total, review) => total + (review.durationMs || 0), 0), completedThemeToday: completed.has(todayNumber), activeDays: dates.length };
+}
+
+export function getWeekStartKey(date = new Date()) {
+  const monday = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  monday.setDate(monday.getDate() - (monday.getDay() + 6) % 7);
+  return getDateKey(monday);
+}
+
+export function getMonthKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+export function getPetWeek(state, date = new Date()) {
+  const weekStart = getWeekStartKey(date);
+  return state.petJourney.weeks.find(week => week.weekStart === weekStart) ?? null;
+}
+
+export function getPetQuestionForWeek(state, date = new Date()) {
+  const existing = getPetWeek(state, date);
+  if (existing) return PET_QUESTIONS.find(item => item.id === existing.questionId) ?? null;
+  const previousQuestionId = state.petJourney.weeks.at(-1)?.questionId;
+  const choices = PET_QUESTIONS.filter(item => item.id !== previousQuestionId);
+  const seed = getWeekStartKey(date).replace(/\D/g, '').split('').reduce((sum, digit) => sum + Number(digit), 0);
+  return choices[seed % choices.length] ?? PET_QUESTIONS[0];
+}
+
+export function getPetStats(state, date = new Date()) {
+  const gameExperience = state.reviews.length * 10;
+  const careExperience = state.petJourney.fedDates.length * 3;
+  const storyExperience = state.petJourney.weeks.filter(week => week.repliedAt !== null).length * 15;
+  const experience = gameExperience + careExperience + storyExperience;
+  const level = Math.floor(experience / 40) + 1;
+  const stage = experience >= 180 ? 'Story keeper' : experience >= 80 ? 'Little explorer' : experience >= 30 ? 'Curious sprout' : 'New friend';
+  const week = getPetWeek(state, date);
+  return {
+    experience,
+    gameExperience,
+    level,
+    stage,
+    progress: experience % 40,
+    nextLevelAt: level * 40,
+    fedToday: state.petJourney.fedDates.includes(getDateKey(date)),
+    week,
+    unlockedDecorations: PET_DECORATIONS.filter(item => experience >= item.unlockXp),
+    answeredWeeks: state.petJourney.weeks.filter(item => item.repliedAt !== null).length,
+  };
+}
+
+function validDateKey(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isFinite(date.getTime()) && getDateKey(date) === value;
+}
+
+function cleanPetJourney(value) {
+  if (!isObject(value) || !Array.isArray(value.fedDates) || !Array.isArray(value.weeks)
+    || value.fedDates.length > 5000 || value.weeks.length > 1000) fail('Invalid pet journey.');
+  if (value.fedDates.some(day => !validDateKey(day)) || !unique(value.fedDates)) fail('Invalid pet care history.');
+  const seenWeeks = new Set();
+  const weeks = value.weeks.map(week => {
+    if (!isObject(week) || !validDateKey(week.weekStart)) fail('Invalid weekly question.');
+    const monday = new Date(`${week.weekStart}T00:00:00`);
+    if ((monday.getDay() + 6) % 7 !== 0 || seenWeeks.has(week.weekStart)) fail('Invalid weekly question date.');
+    seenWeeks.add(week.weekStart);
+    const question = PET_QUESTIONS.find(item => item.id === week.questionId);
+    if (!question || !Number.isSafeInteger(week.askedAt) || week.askedAt < 0 || !isText(week.replyText, 1600)) fail('Invalid weekly story.');
+    if (week.repliedAt !== null && (!Number.isSafeInteger(week.repliedAt) || week.repliedAt < week.askedAt)) fail('Invalid weekly story date.');
+    if (week.voiceNoteId !== null && (typeof week.voiceNoteId !== 'string' || !/^voice-[A-Za-z0-9_-]{8,128}$/.test(week.voiceNoteId))) fail('Invalid voice story reference.');
+    if (week.repliedAt === null && (week.replyText || week.voiceNoteId !== null)) fail('An unfinished story cannot include a saved reply.');
+    if (week.repliedAt !== null && !week.replyText.trim() && week.voiceNoteId === null) fail('A saved story needs text or a voice note.');
+    return { weekStart: week.weekStart, questionId: question.id, askedAt: week.askedAt, replyText: week.replyText, repliedAt: week.repliedAt, voiceNoteId: week.voiceNoteId };
+  });
+  return { fedDates: [...value.fedDates], weeks };
+}
+
+export function feedPet(state, date = new Date()) {
+  const day = typeof date === 'string' ? date : getDateKey(date);
+  if (!validDateKey(day)) fail('Please choose a valid day for Charlie’s care.');
+  if (state.petJourney.fedDates.includes(day)) return state;
+  return { ...state, petJourney: { ...state.petJourney, fedDates: [...state.petJourney.fedDates, day] } };
+}
+
+export function askPetQuestion(state, { weekStart = getWeekStartKey(), questionId, askedAt = Date.now() } = {}) {
+  if (!validDateKey(weekStart) || (new Date(`${weekStart}T00:00:00`).getDay() + 6) % 7 !== 0) fail('Please choose the start of a week.');
+  if (!PET_QUESTIONS.some(item => item.id === questionId)) fail('Please choose an available question for Charlie.');
+  if (!Number.isSafeInteger(askedAt) || askedAt < 0) fail('Please choose a valid question time.');
+  const previous = state.petJourney.weeks.find(week => week.weekStart === weekStart);
+  if (previous) return state;
+  const week = { weekStart, questionId, askedAt, replyText: '', repliedAt: null, voiceNoteId: null };
+  return { ...state, petJourney: { ...state.petJourney, weeks: [...state.petJourney.weeks, week] } };
+}
+
+export function replyToPetQuestion(state, { weekStart, replyText = '', repliedAt = Date.now(), voiceNoteId = null } = {}) {
+  if (!validDateKey(weekStart)) fail('Please choose a valid weekly question.');
+  if (!isText(replyText, 1600)) fail('Please keep the story to 1,600 characters.');
+  if (voiceNoteId !== null && (typeof voiceNoteId !== 'string' || !/^voice-[A-Za-z0-9_-]{8,128}$/.test(voiceNoteId))) fail('Please choose a valid voice story.');
+  const index = state.petJourney.weeks.findIndex(week => week.weekStart === weekStart);
+  if (index < 0) fail('Charlie needs to ask the weekly question first.');
+  const current = state.petJourney.weeks[index];
+  const nextVoiceNoteId = voiceNoteId ?? current.voiceNoteId;
+  if (!replyText.trim() && nextVoiceNoteId === null) fail('Add a short story or record a voice reply.');
+  if (!Number.isSafeInteger(repliedAt) || repliedAt < current.askedAt) fail('Please choose a valid reply time.');
+  const weeks = [...state.petJourney.weeks];
+  weeks[index] = { ...current, replyText: replyText.trim(), repliedAt, voiceNoteId: nextVoiceNoteId };
+  return { ...state, petJourney: { ...state.petJourney, weeks } };
 }
 
 function sessionMetadata(session) {
@@ -353,8 +480,9 @@ export function redeemReward(state, rewardId) {
 // Treat all persisted data as untrusted. Reject incompatible snapshots rather than
 // partially restoring a balance or references that no longer agree with each other.
 function validatedState(value) {
-  if (!isObject(value) || value.version !== 1) fail('Unsupported saved data.');
+  if (!isObject(value) || ![1, 2].includes(value.version)) fail('Unsupported saved data.');
   const state = createState();
+  state.petJourney = value.version === 1 ? { fedDates: [], weeks: [] } : cleanPetJourney(value.petJourney);
   state.profile = value.profile === null ? null : cleanProfile(value.profile);
   for (const key of ['reviews', 'friends', 'joinedGroups', 'redemptions', 'completedSessions']) {
     if (!Array.isArray(value[key]) || value[key].length > 10000) fail('Invalid saved history.');

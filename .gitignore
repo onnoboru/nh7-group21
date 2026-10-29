@@ -1,10 +1,40 @@
-node_modules/
-.cache/
+# Local credentials and agent/tool configuration
 .env
 .env.*
 !.env.example
+.aws/
+.codex/
+.agents/
+secrets/
+credentials/
+*.pem
+*.key
+*.p12
+*.pfx
+*service-account*.json
+firebase-adminsdk*.json
+
+# Dependencies and generated test/cache files
+node_modules/
+.cache/
 coverage/
 test-results/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 *.log
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# OS files and private brainstorming documents
 .DS_Store
+Thumbs.db
+*.swp
+*~
 ideas/
