@@ -1,4 +1,4 @@
-# Kindred
+# GrandPals
 
 `idea_a.md`〜`idea_e.md` と `idea_like.md` をもとに、子どもと高齢者の交流をゲームとペットの成長から育てる Web アプリです。アプリ内の画面・メッセージは英語、説明文書は日本語です。
 
@@ -102,7 +102,7 @@ GitHub リポジトリの作成から push までのコマンドは [PUBLISHING.
 
 1. GitHub でリポジトリを作り、このプロジェクトのファイルを `main` ブランチへ push します。
 2. リポジトリの **Settings → Pages → Build and deployment → Source** で **GitHub Actions** を選びます。
-3. `main` への push で公開処理が始まります。手動の場合は **Actions → Publish Kindred to GitHub Pages → Run workflow** を選びます。
+3. `main` への push で公開処理が始まります。手動の場合は **Actions → Publish GrandPals to GitHub Pages → Run workflow** を選びます。
 4. 成功後、**Settings → Pages** または Actions のデプロイ結果に表示される URL をチームに共有します。通常は `https://<owner>.github.io/<repository>/` です。
 
 ブランチ名が `main` 以外なら workflow の `branches` を変更してください。画像・CSS・JavaScript は相対パスで参照しているため、リポジトリのサブパスでも動きます。URL の画面切替には `#activities` などのハッシュを使い、サーバーの URL 書き換え設定は不要です。

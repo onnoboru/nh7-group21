@@ -10,7 +10,7 @@ test('static server serves only public assets and handles HTTP requests', async 
   const root = join(dir, 'public');
   const { mkdir } = await import('node:fs/promises');
   await mkdir(root);
-  await writeFile(join(root, 'index.html'), '<html lang="en">Kindred</html>');
+  await writeFile(join(root, 'index.html'), '<html lang="en">GrandPals</html>');
   await writeFile(join(root, 'app.js'), 'export const example = true;');
   await writeFile(join(dir, 'private.txt'), 'private');
   await symlink(join(dir, 'private.txt'), join(root, 'linked.txt'));
@@ -31,7 +31,7 @@ test('static server serves only public assets and handles HTTP requests', async 
   await t.test('serves the entry page', async () => {
     const res = await get('/?preview=1');
     assert.equal(res.status, 200);
-    assert.match(res.body, /Kindred/);
+    assert.match(res.body, /GrandPals/);
     assert.match(res.headers['content-type'], /text\/html/);
   });
   await t.test('serves ESM with JavaScript MIME type', async () => {
@@ -75,5 +75,5 @@ test('HTTP listener smoke test', async t => {
   t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
   const response = await fetch(`http://127.0.0.1:${server.address().port}/`);
   assert.equal(response.status, 200);
-  assert.match(await response.text(), /Kindred/);
+  assert.match(await response.text(), /GrandPals/);
 });

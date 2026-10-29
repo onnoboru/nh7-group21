@@ -37,7 +37,7 @@
 - 保護者の承認・通報・ブロック・データ管理が整う前の、見知らぬ利用者との交流。
 - 録音内容を使った AI 分析や自動要約。初期のストーリーブックは入力済みの文章と定型レイアウトから作る。
 
-Build **Kindred**, an English-language, responsive, local-first intergenerational community prototype based on idea_a.md. No runtime dependencies, external assets, trackers, or build step. Static deployable `dist/` with relative URLs. Japanese README only; all product text English.
+Build **GrandPals**, an English-language, responsive, local-first intergenerational community prototype based on idea_a.md. No runtime dependencies, external assets, trackers, or build step. Static deployable `dist/` with relative URLs. Japanese README only; all product text English.
 
 ## Face-to-face use
 Support two real people on one shared device without a profile. Enter two distinct nicknames and choose one of seven activity styles. Both people answer each quiz question before revealing the answer; both take a turn on every conversation prompt. Completed sessions save their names and quiz scores in My circle without a review form, award 30 shared points, and add 10 Charlie growth points. Preserve existing v1 saved data, community demo, solo activities, and hosting portability. In-progress activities are not persisted.

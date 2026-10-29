@@ -1,4 +1,4 @@
-name: Publish Kindred to GitHub Pages
+name: Publish GrandPals to GitHub Pages
 
 on:
   push:
