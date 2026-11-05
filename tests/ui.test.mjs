@@ -11,7 +11,7 @@ const source = readFileSync(new URL('../dist/app.js', import.meta.url), 'utf8')
   .replace(/^import \{[\s\S]*?\} from '\.\/core\.js';/m, '')
   .replace(/^import \{[\s\S]*?\} from '\.\/local-audio\.js';/m, '');
 
-function harness({ initial = null, initialPreferences = null, blocked = false, initialHash = '' } = {}) {
+function harness({ initial = null, initialPreferences = null, blocked = false, initialHash = '', dailyTheme = null } = {}) {
   const handlers = {};
   const nodes = new Map();
   const saved = new Map(initial ? [[core.STORAGE_KEY, JSON.stringify(initial)]] : []);
@@ -46,6 +46,7 @@ function harness({ initial = null, initialPreferences = null, blocked = false, i
   const location = { hash: initialHash };
   const context = createContext({
     ...core, document, location, localStorage: storage,
+    getDailyTheme: (state, date) => dailyTheme ?? core.getDailyTheme(state, date),
     saveVoiceNote: async (id, blob) => { voiceNotes.set(id, blob); },
     loadVoiceNote: async id => voiceNotes.get(id) || null,
     deleteVoiceNote: async id => { voiceNotes.delete(id); },
@@ -505,14 +506,19 @@ test('Play together keeps the chosen game style and daily theme without asking f
   await ui.submit('together-setup-form', { name0: 'Alex', name1: 'Gran' }, { kind: 'conversation' });
   assert.equal(ui.session().activity.kind, 'conversation');
 
-  const dailyUi = harness();
-  const daily = core.getDailyTheme(dailyUi.state());
-  await dailyUi.click('together-setup', { id: daily.id });
-  assert.match(dailyUi.dialog(), /TODAY’S GAME/);
-  assert.ok(dailyUi.dialog().includes(daily.title));
-  assert.doesNotMatch(dailyUi.dialog(), /name="kind"/);
-  await dailyUi.submit('together-setup-form', { name0: 'Alex', name1: 'Gran' }, { pinned: daily.id, kind: daily.kind });
-  assert.equal(dailyUi.session().activity.id, daily.id);
+  // Exercise the entire rotation every run, including the escaped ampersand in
+  // "Then & now", rather than selecting coverage using the machine's date.
+  for (const daily of core.ACTIVITIES) {
+    const dailyUi = harness({ dailyTheme: daily });
+    await dailyUi.click('together-setup', { id: daily.id });
+    assert.match(dailyUi.dialog(), /TODAY’S GAME/);
+    assert.ok(dailyUi.dialog().includes(`<h3>${daily.title.replaceAll('&', '&amp;')}</h3>`), daily.id);
+    assert.doesNotMatch(dailyUi.dialog(), /name="kind"/);
+    await dailyUi.submit('together-setup-form', { name0: 'Alex', name1: 'Gran' }, { pinned: daily.id, kind: daily.kind });
+    assert.ok(dailyUi.session(), dailyUi.error('#together-setup-error') || daily.id);
+    assert.equal(dailyUi.session().activity.id, daily.id);
+    assert.equal(dailyUi.session().activity.kind, daily.kind);
+  }
 });
 
 test('local weekly pet story, printable book, and every face-to-face game grow Charlie', async () => {
