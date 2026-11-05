@@ -18,6 +18,7 @@ firebase-adminsdk*.json
 node_modules/
 .cache/
 coverage/
+demo/
 test-results/
 .venv/
 venv/

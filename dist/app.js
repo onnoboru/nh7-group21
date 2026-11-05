@@ -3,6 +3,8 @@ import {
   setProfile, getMode, getMatches, getRecommendedGroups, getSuggestedActivity, getDailyTheme, getDateKey, getJourneyStats,
   getWeekStartKey, getMonthKey, getPetWeek, getPetQuestionForWeek, getPetStats, feedPet, askPetQuestion, replyToPetQuestion,
   completeSession, joinGroup, redeemReward, createTogetherSession, answerTogetherQuestion, advanceTogetherSession, skipTogetherStep, completeTogetherSession,
+  LEARNING_STAGES, CHALLENGES, STICK_COLOURS, getLearningStage, getLearningSettings, getLearningActivity, createStickGame, getStickGameStats, pickStick,
+  PET_EVOLUTIONS, getPetForm,
 } from './core.js';
 import { saveVoiceNote, loadVoiceNote, deleteVoiceNote, clearVoiceNotes, canRecordVoiceNote } from './local-audio.js';
 
@@ -14,6 +16,7 @@ let page = 'discover';
 let session = null;
 let returnFocus = null;
 let toastTimer;
+let pendingRewardId = null;
 let storageAvailable = true;
 let voiceRecorder = null;
 let voiceStream = null;
@@ -24,7 +27,7 @@ let voiceObjectUrl = null;
 let voiceRecordingTimeout = null;
 let storybookMonth = getMonthKey();
 const PREFERENCES_KEY = 'kindred-local-preferences-v1';
-const GAME_KINDS = ['quiz', 'conversation', 'random', 'choice', 'collaborative', 'reflection', 'walk'];
+const GAME_KINDS = ['sticks', 'quiz', 'conversation', 'random', 'choice', 'collaborative', 'reflection', 'walk'];
 try { void localStorage.length; } catch { storageAvailable = false; }
 
 function loadPreferences() {
@@ -38,7 +41,8 @@ function loadPreferences() {
     const lastPair = Array.isArray(names) && names.length === 2 && names.every(name => typeof name === 'string' && name.trim() && name.trim().length <= 40)
       && names[0].trim().toLowerCase() !== names[1].trim().toLowerCase() && GAME_KINDS.includes(kind)
       ? { names: names.map(name => name.trim()), kind } : null;
-    return { textSize, autoRead: stored.autoRead === true, lastPair };
+    const learning = stored.learning && [6, 9, 12].includes(stored.learning.age) && [1, 2, 3].includes(stored.learning.challenge) ? stored.learning : null;
+    return { textSize, autoRead: stored.autoRead === true, lastPair, learning };
   } catch { return defaults; }
 }
 let preferences = loadPreferences();
@@ -64,6 +68,7 @@ function speak(text) {
 function speechTextForSession() {
   if (!session) return '';
   const activity = session.activity;
+  if (activity.kind === 'sticks') return 'Find a stick with nothing crossing above it. Choose its number and lift it. A blocked stick costs one HP. Clear the pile together.';
   if (activity.kind !== 'quiz') return promptFor(session, session.step);
   const question = activity.questions[session.step];
   const answers = question.answers.map((answer, index) => `Option ${String.fromCharCode(65 + index)}: ${answer}`).join('. ');
@@ -109,17 +114,17 @@ function hasSavedExperience() {
   return Boolean(state.profile || state.reviews.length || state.redemptions.length || state.petJourney.fedDates.length || state.petJourney.weeks.length);
 }
 function render() {
-  const nav = [['discover', 'Discover'], ['activities', 'Activities'], ['characters', 'Characters'], ['circle', 'My circle'], ['rewards', 'Rewards']];
+  const nav = [['discover', 'Discover'], ['activities', 'Activities'], ['characters', 'Characters'], ['circle', 'My circle'], ['rewards', 'Rewards'], ['settings', 'Settings']];
   app.innerHTML = `<div class="app-shell">
     <aside class="sidebar" aria-label="Main navigation">
       <a class="brand" href="#discover" aria-label="GrandPals home"><span class="brand-mark" aria-hidden="true">G<span>✦</span></span><span class="brand-name">GrandPals</span></a>
-      <nav class="nav">${nav.map(([id, label]) => `<button type="button" class="nav-item ${page === id ? 'active' : ''}" data-action="navigate" data-page="${id}" ${page === id ? 'aria-current="page"' : ''}><span class="nav-icon">${icon(id)}</span><span>${label}</span>${id === 'circle' && state.friends.length ? `<span class="nav-count">${state.friends.length}</span>` : ''}</button>`).join('')}</nav>
-      <div class="sidebar-footer">${button(`${icon('settings')} ${hasSavedExperience() ? 'Profile & settings' : 'Set up profile'}`, 'profile', 'ghost profile-button')}</div>
+      <nav class="nav">${nav.map(([id, label]) => `<button type="button" class="nav-item ${['characters', 'rewards'].includes(id) ? 'nav-secondary' : ''} ${page === id ? 'active' : ''}" data-action="navigate" data-page="${id}" ${page === id ? 'aria-current="page"' : ''}><span class="nav-icon">${icon(id)}</span><span>${label}</span>${id === 'circle' && state.friends.length ? `<span class="nav-count">${state.friends.length}</span>` : ''}</button>`).join('')}</nav>
+      <div class="sidebar-footer">${button(`${icon('settings')} Profile`, 'profile', 'ghost profile-button')}</div>
     </aside>
     <main class="main" id="main-content" tabindex="-1">
-      <header class="topbar"><div class="header-actions"><button class="points-pill" type="button" data-action="navigate" data-page="rewards" aria-label="${state.points} kindness points. Open rewards."><span aria-hidden="true">✦</span> ${state.points}<span class="points-label"> points</span></button><button type="button" class="avatar" data-action="profile" aria-label="${state.profile ? 'Edit your profile' : 'Create your profile'}">${state.profile ? esc(initials(state.profile.name)) : icon('circle')}</button></div></header>
+      <header class="topbar"><div class="header-actions"><button class="points-pill" type="button" data-action="navigate" data-page="rewards" aria-label="${state.points} kindness points. Open rewards."><span aria-hidden="true">✦</span> ${state.points}<span class="points-label"> points</span></button><button type="button" class="avatar" data-action="profile" aria-label="${state.profile ? 'Edit your profile' : 'Create profile'}">${state.profile ? esc(initials(state.profile.name)) : icon('circle')}</button></div></header>
       ${!storageAvailable ? '<div class="notice" role="alert">Browser storage is unavailable. Your changes will only last for this visit.</div>' : ''}
-      ${page === 'storybook' ? renderStorybook() : page === 'discover' ? renderDiscover() : page === 'activities' ? renderActivities() : page === 'characters' ? renderCharacters() : page === 'circle' ? renderCircle() : renderRewards()}
+      ${page === 'settings' ? renderSettings() : page === 'storybook' ? renderStorybook() : page === 'discover' ? renderDiscover() : page === 'activities' ? renderActivities() : page === 'characters' ? renderCharacters() : page === 'circle' ? renderCircle() : renderRewards()}
     </main></div>`;
 }
 
@@ -146,36 +151,108 @@ function renderSharedJourney(showLink = true) {
   const stats = getJourneyStats(state);
   const totalMinutes = Math.floor(stats.totalDurationMs / 60000);
   const duration = totalMinutes >= 60 ? `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m` : `${totalMinutes}m`;
-  return `<section class="shared-journey card" aria-labelledby="journey-title"><h2 id="journey-title">Your moments</h2><dl class="journey-stats"><div><dt>Moments</dt><dd data-stat="moments">${state.reviews.length}</dd></div><div><dt>Points</dt><dd data-stat="points">${state.points}</dd></div><div><dt>Streak</dt><dd>${stats.currentStreak}<span class="stat-unit"> days</span></dd></div><div><dt>Time together</dt><dd>${duration}</dd></div></dl><p class="field-help">Best streak: ${stats.longestStreak} ${stats.longestStreak === 1 ? 'day' : 'days'}</p>${latestPair ? `<div class="journey-pair"><p>${latestPair.participants.map(participant => `<span class="interest-tag">${esc(participant.name)}</span>`).join(' <span aria-hidden="true">&amp;</span> ')}</p></div>` : ''}${showLink ? button('See all moments', 'circle', 'ghost small') : ''}</section>`;
+  return `<section class="shared-journey card" aria-labelledby="journey-title"><h2 id="journey-title">Your moments</h2><dl class="journey-stats"><div><dt>Moments</dt><dd data-stat="moments">${state.reviews.length}</dd></div><div><dt>Points</dt><dd data-stat="points">${state.points}</dd></div><div><dt>Streak</dt><dd>${stats.currentStreak}<span class="stat-unit"> days</span></dd></div><div><dt>Time together</dt><dd>${duration}</dd></div></dl><p class="field-help">Best streak: ${stats.longestStreak} ${stats.longestStreak === 1 ? 'day' : 'days'}</p>${latestPair ? `<div class="journey-pair"><p>${latestPair.participants.map(participant => `<span class="interest-tag">${esc(participant.name)}</span>`).join(' <span aria-hidden="true">&amp;</span> ')}</p></div>` : ''}${showLink ? button('Moments', 'circle', 'ghost small') : ''}</section>`;
+}
+// Each nested group owns one motion, so reactions blend with the idle pose.
+function renderCharlieRig(pet) {
+  const form = getPetForm(pet.experience);
+  const stage = PET_EVOLUTIONS.indexOf(form);
+  const body = ['#f3dba9', '#f0ca8c', '#e3b47d', '#d49a68'][stage];
+  const earSize = [.76, .9, 1, 1.08][stage];
+  const ornament = stage === 0
+    ? '<path d="M60 30c-7-14 3-21 14-22-1 11-5 18-14 22Z" fill="#7ca56e"/>'
+    : stage === 1
+      ? '<path d="M59 30C39 26 38 13 40 9c14 1 22 8 19 21Z" fill="#60955d"/><path d="M61 29c-5-17 5-23 17-23-2 13-7 20-17 23Z" fill="#8ab96b"/>'
+      : stage === 2
+        ? '<path d="M37 27 42 8h36l7 19Z" fill="#b58245"/><path d="M40 19h40l2 8H38Z" fill="#648d63"/><path d="M29 28q31-10 62 0" fill="none" stroke="#d5ad68" stroke-width="8" stroke-linecap="round"/><path d="M71 16c-1-10 6-13 13-13-1 8-5 12-13 13Z" fill="#79a466"/>'
+        : '<path d="m37 24 1-15 14 9 8-17 9 17 13-9 1 15Z" fill="#ddad50" stroke="#b98b35" stroke-width="2"/><path d="m60 11 2.4 5 5.6.8-4 3.9 1 5.5-5-2.6-5 2.6 1-5.5-4-3.9 5.6-.8Z" fill="#fff3bc"/>';
+  const backGear = stage === 2
+    ? '<rect x="80" y="58" width="26" height="37" rx="9" fill="#628e79" stroke="#416d5a" stroke-width="2"/><path d="M94 61v30m-7-10h13" stroke="#d5ad68" stroke-width="3" stroke-linecap="round"/>'
+    : stage === 3 ? '<path d="M36 68 24 101q37 11 73-1L84 68Z" fill="#8b779c" stroke="#76608b" stroke-width="2"/>' : '';
+  const frontGear = stage === 1
+    ? '<path d="M40 72q20 13 40 0l-5 12q-14 8-30 0Z" fill="#6c9b67"/><path d="m65 81 14 3-8 15-10-12Z" fill="#82ac73"/>'
+    : stage === 2 ? '<path d="M39 71 43 94m38-23-4 23" stroke="#628e79" stroke-width="6" stroke-linecap="round"/>'
+      : stage === 3 ? '<path d="M37 81q12-5 23 1 12-6 24-1v20q-12-4-24 1-11-5-23-1Z" fill="#fff7df" stroke="#ad8a56" stroke-width="2"/><path d="M60 82v19m-17-12h11m12 0h12m-35 6h11m12 0h12" stroke="#b7a17b" stroke-width="1.5"/>' : '';
+  return `<ellipse class="charlie-shadow" cx="60" cy="98" rx="38" ry="6" fill="#9eaf8d" opacity=".4"/>
+    <g class="charlie-motion" data-pet-form="${form.id}"><g class="charlie-breath">
+      ${backGear}
+      <path class="charlie-tail" d="M82 82c12-19 28-16 26-6-1 9-15 16-26 13Z" fill="${body}" stroke="#c18d61" stroke-width="2"/>
+      <ellipse cx="60" cy="80" rx="25" ry="21" fill="${body}"/><ellipse cx="60" cy="82" rx="16" ry="14" fill="#f8e7c5"/>
+      <ellipse cx="44" cy="97" rx="11" ry="5" fill="${body}"/><ellipse cx="76" cy="97" rx="11" ry="5" fill="${body}"/>
+      ${frontGear}
+      <g class="charlie-head">
+        <g transform="translate(35 30) scale(${earSize})"><g class="charlie-ear-left"><circle r="9" fill="${body}"/><circle cx="-.5" cy="-.5" r="4.5" fill="#e8b7a0"/></g></g>
+        <g transform="translate(85 30) scale(${earSize})"><g class="charlie-ear-right"><circle r="9" fill="${body}"/><circle cx=".5" cy="-.5" r="4.5" fill="#e8b7a0"/></g></g>
+        <circle cx="60" cy="49" r="31" fill="${body}"/><ellipse cx="60" cy="61" rx="19" ry="12" fill="#f8e7c5"/>
+        <g transform="translate(0 -9)"><g class="charlie-face">
+          <g class="charlie-open-eyes"><g class="charlie-eye"><ellipse cx="47" cy="57" rx="3.5" ry="4.5" fill="#39473c"/><circle cx="48" cy="56" r="1" fill="#fffaf0"/></g><g class="charlie-eye"><ellipse cx="73" cy="57" rx="3.5" ry="4.5" fill="#39473c"/><circle cx="74" cy="56" r="1" fill="#fffaf0"/></g></g>
+          <g class="charlie-happy-eyes" fill="none" stroke="#39473c" stroke-width="3" stroke-linecap="round"><path d="M42 58q5-7 10 0"/><path d="M68 58q5-7 10 0"/></g>
+          <g class="charlie-cheeks" fill="#df9583"><ellipse cx="38" cy="65" rx="6" ry="3"/><ellipse cx="82" cy="65" rx="6" ry="3"/></g>
+          <path d="M57 66q3-3 6 0l-3 3Z" fill="#805342"/>
+          <path class="charlie-smile" d="M52 73q8 8 16 0" fill="none" stroke="#805342" stroke-width="3" stroke-linecap="round"/>
+          <ellipse class="charlie-munch" cx="60" cy="75" rx="4" ry="3" fill="#805342"/>
+        </g></g>
+        <g transform="translate(0 ${stage < 2 ? -5 : 0})"><g class="charlie-leaf">${stage < 2 ? '<path d="M44 32q16-17 32 0" fill="none" stroke="#6f945d" stroke-width="7" stroke-linecap="round"/>' : ''}${ornament}</g></g>
+      </g>
+      <g transform="translate(35 82) rotate(-12)"><ellipse class="charlie-paw-left" cx="0" cy="0" rx="6.5" ry="9" fill="${body}"/></g>
+      <g transform="translate(85 82) rotate(12)"><ellipse class="charlie-paw-right" cx="0" cy="0" rx="6.5" ry="9" fill="${body}"/></g>
+      <g transform="translate(0 -9)"><g class="charlie-snack"><path d="M55 77q-8-17 3-15l5 1q11-2 3 15Z" fill="#eaa15f"/><path d="M60 64q-8-9-5-12 8 0 8 10 1-10 8-9 0 7-8 11" fill="#79a466"/></g></g>
+    </g></g>
+    <g class="charlie-joy" fill="#dc927d"><path d="M17 38c-9-10-16 3 0 12 16-9 9-22 0-12Z"/><path d="M102 27c-7-8-13 2 0 10 13-8 7-18 0-10Z"/></g>`;
 }
 function renderPetArt(pet) {
-  const body = pet.experience >= 180 ? '#d49a68' : pet.experience >= 80 ? '#e3b47d' : pet.experience >= 30 ? '#f0ca8c' : '#f3dba9';
-  const earSize = pet.experience >= 80 ? 1 : .82;
   const decor = pet.unlockedDecorations.map(item => `<span title="${esc(item.name)}">${esc(item.icon)}</span>`).join('');
-  return `<div class="pet-room-art" aria-label="Charlie’s cozy room with ${pet.unlockedDecorations.length} decorations" role="img"><svg class="charlie-art" viewBox="0 0 300 260" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="16" y="18" width="268" height="218" rx="26" fill="#f8edda"/><path d="M16 174h268v36c0 14-12 26-26 26H42c-14 0-26-12-26-26Z" fill="#d6e2c8"/><rect x="34" y="42" width="66" height="76" rx="14" fill="#e4f1ee" stroke="#fffaf0" stroke-width="8"/><path d="M67 46v70M38 80h58" stroke="#b4cdc2" stroke-width="5"/><path d="M37 192c13-21 26-20 38 0m-17-5c-3-14 1-23 10-28 8 11 7 20-1 28" fill="none" stroke="#6c986d" stroke-width="7" stroke-linecap="round"/><ellipse cx="169" cy="207" rx="78" ry="15" fill="#b2c49f" opacity=".55"/><path d="M119 109c-12-39 0-61 18-55 7-28 35-35 48-2 22-6 33 20 16 56Z" fill="#a7bb8f"/><g transform="translate(150 146)"><path d="M-55-34c-34-44-54 7-8 43m118-43c34-44 54 7 8 43" fill="${body}" transform="scale(${earSize})"/><ellipse cx="0" cy="5" rx="61" ry="58" fill="${body}"/><ellipse cx="0" cy="27" rx="35" ry="27" fill="#f8e7c5"/><ellipse cx="-21" cy="5" rx="5" ry="7" fill="#39473c"/><ellipse cx="21" cy="5" rx="5" ry="7" fill="#39473c"/><path d="M-9 25q9 9 18 0" fill="none" stroke="#805342" stroke-width="4" stroke-linecap="round"/><path d="M-18-51q18-19 36 0" fill="none" stroke="#6f945d" stroke-width="9" stroke-linecap="round"/><path d="M0-54c-7-15 3-24 15-25-1 12-5 20-15 25Z" fill="#7ca56e"/></g><path d="M206 175c17-9 28-8 38 0" fill="none" stroke="#b57b51" stroke-width="7" stroke-linecap="round"/><circle cx="235" cy="155" r="4" fill="#d7a35a"/></svg><div class="pet-room-decor" aria-hidden="true">${decor || '<span>🌱</span>'}</div></div>`;
+  return `<div class="pet-room-art" aria-label="Charlie’s cozy room with ${pet.unlockedDecorations.length} decorations" role="img"><svg class="charlie-art" viewBox="0 0 300 260" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="16" y="18" width="268" height="218" rx="26" fill="#f8edda"/><path d="M16 174h268v36c0 14-12 26-26 26H42c-14 0-26-12-26-26Z" fill="#d6e2c8"/><rect x="34" y="42" width="66" height="76" rx="14" fill="#e4f1ee" stroke="#fffaf0" stroke-width="8"/><path d="M67 46v70M38 80h58" stroke="#b4cdc2" stroke-width="5"/><g transform="translate(51 47) scale(1.65)">${renderCharlieRig(pet)}</g><g transform="translate(239 210)"><ellipse cy="-4" rx="16" ry="5" fill="#b67c55"/><path d="M-16-4h32l-4 10h-24Z" fill="#d3a780"/><ellipse cy="-4" rx="11" ry="2" fill="#f1cd8a"/></g></svg><div class="pet-room-decor" aria-hidden="true">${decor || '<span>🌱</span>'}</div></div>`;
 }
-function renderCharlieMascot() {
-  const pet = getPetStats(state);
-  const body = pet.experience >= 180 ? '#d49a68' : pet.experience >= 80 ? '#e3b47d' : pet.experience >= 30 ? '#f0ca8c' : '#f3dba9';
-  return `<svg class="charlie-mascot" viewBox="0 0 120 112" role="img" aria-label="Charlie, your growing family pet" xmlns="http://www.w3.org/2000/svg"><ellipse cx="60" cy="96" rx="42" ry="7" fill="#bdc9ac" opacity=".55"/><path d="M37 47C16 13 3 47 34 67m49-20c21-34 34 0 3 20" fill="${body}"/><ellipse cx="60" cy="62" rx="37" ry="34" fill="${body}"/><ellipse cx="60" cy="72" rx="21" ry="15" fill="#f8e7c5"/><circle cx="47" cy="59" r="3.5" fill="#39473c"/><circle cx="73" cy="59" r="3.5" fill="#39473c"/><path d="M52 74q8 8 16 0" fill="none" stroke="#805342" stroke-width="3.5" stroke-linecap="round"/><path d="M44 32q16-17 32 0" fill="none" stroke="#6f945d" stroke-width="7" stroke-linecap="round"/><path d="M60 30c-7-14 3-21 14-22-1 11-5 18-14 22Z" fill="#7ca56e"/></svg>`;
+function renderCharlieMascot(pet = getPetStats(state)) {
+  return `<svg class="charlie-mascot" viewBox="0 0 120 112" role="img" aria-label="Charlie, ${esc(getPetForm(pet.experience).name)}" xmlns="http://www.w3.org/2000/svg">${renderCharlieRig(pet)}</svg>`;
+}
+function hasEvolved(previousExperience, pet) {
+  return getPetForm(previousExperience).unlockXp < pet.form.unlockXp;
+}
+function renderEvolution(previousExperience, pet) {
+  const previous = getPetForm(previousExperience);
+  return `<div class="evolution-reveal" data-from="${previous.id}" data-to="${pet.form.id}" role="img" aria-label="Charlie evolves from ${esc(previous.name)} to ${esc(pet.stage)}"><div class="evolution-halo" aria-hidden="true"></div><div class="evolution-before" aria-hidden="true">${renderCharlieMascot({ experience: previousExperience })}</div><div class="evolution-after" aria-hidden="true">${renderCharlieMascot(pet)}</div><span class="evolution-sparkles" aria-hidden="true">✦</span></div><p class="evolution-stage">${esc(pet.stage)}</p>`;
+}
+function showPetEvolution(previousExperience, pet, { replay = false, reward = '', eyebrow = 'NEW GROWTH' } = {}) {
+  showDialog(`<div class="celebration compact-completion evolution-celebration" role="status"><p class="eyebrow">${replay ? 'EVOLUTION REPLAY' : esc(eyebrow)}</p><h2 id="dialog-title">Charlie evolved!</h2>${renderEvolution(previousExperience, pet)}${reward ? `<p class="completion-unlock">${esc(reward)}</p>` : ''}${button('Done', 'close-dialog', 'primary celebration-dismiss')}</div>`, { className: 'compact-completion-modal evolution-modal', initialFocus: '.celebration-dismiss' });
+}
+function renderEvolutionJourney(pet) {
+  return `<section class="evolution-journey card"><h2>Charlie’s journey</h2><div class="evolution-forms">${PET_EVOLUTIONS.map((form, index) => `<article class="evolution-form ${pet.experience >= form.unlockXp ? 'unlocked' : 'locked'}">${renderCharlieMascot({ experience: form.unlockXp })}<h3>${esc(form.name)}</h3>${pet.experience >= form.unlockXp ? index ? button('Replay', 'evolution-replay', 'secondary small', `data-id="${form.id}"`) : '<span class="field-help">First friend</span>' : `<span class="field-help">${form.unlockXp} growth</span>`}</article>`).join('')}</div></section>`;
+}
+function activeLearning() {
+  const age = preferences.learning?.age ?? state.profile?.age ?? 12;
+  const challenge = preferences.learning?.challenge ?? 1;
+  return getLearningSettings(state, age, CHALLENGES[challenge - 1].unlockLevel <= getPetStats(state).level ? challenge : 1);
+}
+function renderSettings() {
+  const learning = activeLearning(), pet = getPetStats(state);
+  const stage = getLearningStage(learning.age);
+  return `<div class="page-heading"><div><h1 class="page-title">Settings</h1><p class="muted">Set up once. Games and conversations adapt for you.</p></div></div>
+    <section class="card settings-games" aria-labelledby="game-settings-title"><h2 id="game-settings-title">Games & conversations</h2><form id="learning-form"><div class="learning-fields"><div class="form-field"><label for="learning-age">Child’s age group</label><select id="learning-age" name="ageBand">${LEARNING_STAGES.map(item => `<option value="${item.age}" ${learning.age === item.age ? 'selected' : ''}>${item.ages}</option>`).join('')}</select><small class="field-help">Questions and talk topics follow this age group.</small></div><div class="form-field"><label for="learning-challenge">Challenge</label><select id="learning-challenge" name="challenge">${CHALLENGES.map(item => `<option value="${item.id}" ${item.id === learning.challenge ? 'selected' : ''} ${pet.level < item.unlockLevel ? 'disabled' : ''}>${item.name}${pet.level < item.unlockLevel ? ` · Charlie level ${item.unlockLevel}` : ''}</option>`).join('')}</select><small class="field-help">Choose from the challenges Charlie has unlocked.</small></div></div><p class="form-error" id="learning-error" role="alert"></p><button type="submit" class="button primary">Save</button></form>
+    <details class="settings-progress"><summary>Charlie’s progress & unlocked challenges</summary><p>Charlie · Level ${pet.level} · ${pet.progress} / 40 to the next level</p><p>${stage.ages}: ${stage.detail}</p><div class="unlock-grid">${CHALLENGES.map(item => `<div class="unlock-card ${pet.level >= item.unlockLevel ? 'unlocked' : ''}"><span class="eyebrow">${pet.level >= item.unlockLevel ? '✓ AVAILABLE' : `LEVEL ${item.unlockLevel}`}</span><h3>${item.name}</h3><p>${item.detail}</p></div>`).join('')}</div><p class="field-help">Stick count follows the challenge for all ages. Each game gives Charlie 10 growth points; every 40 points adds a level.</p></details></section>
+    <div class="settings-grid"><section class="card"><h2>Display & reading</h2><p class="muted">Choose a text size or have prompts read aloud.</p>${button('Display', 'display-settings', 'secondary')}</section><section class="card"><h2>Your profile</h2><p class="muted">${state.profile ? esc(state.profile.name) : 'Add a nickname and interests when you’re ready.'}</p>${button('Profile', 'profile', 'secondary')}</section><section class="card"><h2>More with Charlie</h2><div class="settings-links">${button('Characters', 'characters', 'secondary')}${button('Rewards', 'rewards', 'secondary')}</div></section></div>`;
+}
+function renderHP(hp = session.hp ?? 3) {
+  return `<div class="game-hp" role="status"><strong>HP ${hp} / 3</strong><span aria-hidden="true">${'♥'.repeat(hp)}${'♡'.repeat(3 - hp)}</span><span class="field-help">${hp ? 'A missed answer or blocked stick uses 1 HP. Take your time.' : 'Take a breather to restore your HP. Your progress is safe.'}</span>${hp === 0 ? button('Recover', 'restore-hp', 'primary') : ''}</div>`;
 }
 function renderCharacters() {
   const pet = getPetStats(state);
   const progress = Math.round(pet.progress / 40 * 100);
-  return `<div class="page-heading character-page-heading"><div><p class="eyebrow">MEET YOUR KINDRED CHARACTERS</p><h1 class="page-title">Characters</h1><p class="muted">Meet Charlie and the fictional people in our activity previews.</p></div></div><section class="character-feature card"><div class="character-feature-art">${renderPetArt(pet)}<span class="pet-level-badge">LEVEL ${pet.level}</span></div><div class="character-feature-copy"><p class="eyebrow">YOUR FAMILY’S VIRTUAL PET</p><h2>Charlie</h2><p>Charlie is a little friend who grows as your family spends time together. Finish any game, care for Charlie, or share a family story to help him grow.</p><div class="pet-growth-meter"><div class="pet-growth-label"><span>${esc(pet.stage)}</span><strong>${pet.progress} / 40</strong></div><div class="progress-track" role="progressbar" aria-label="Charlie’s growth to the next level" aria-valuemin="0" aria-valuemax="40" aria-valuenow="${pet.progress}"><div class="progress-fill" style="width:${progress}%"></div></div></div><div class="character-actions">${button('Play a game with Charlie', 'activities', 'primary')}${button('Visit Charlie’s home', 'discover', 'secondary')}</div></div></section><section class="character-roster"><div class="section-heading"><div><p class="eyebrow">ACTIVITY PREVIEW CAST</p><h2>Story characters</h2></div><span class="section-subtitle">Fictional demo profiles</span></div><p class="character-note">These sample characters show how a future community preview could look. They are not real people or live connections.</p><div class="grid character-grid">${PEOPLE.map(person => `<article class="card character-card"><div class="person-top"><div class="person-avatar person-${esc(person.generation)} color-${esc(person.color)}" aria-hidden="true">${esc(person.initials)}</div><div class="person-details"><h3>${esc(person.name)}</h3><span class="person-meta">${person.generation === 'senior' ? 'Grandparent generation' : 'Younger generation'} · ${person.age}</span></div></div><p>${esc(person.bio)}</p>${tags(person.interests)}</article>`).join('')}</div></section>`;
+  return `<div class="page-heading character-page-heading"><div><p class="eyebrow">MEET YOUR KINDRED CHARACTERS</p><h1 class="page-title">Characters</h1><p class="muted">Meet Charlie and the fictional people in our activity previews.</p></div></div><section class="character-feature card"><div class="character-feature-art">${renderPetArt(pet)}<span class="pet-level-badge">LEVEL ${pet.level}</span></div><div class="character-feature-copy"><p class="eyebrow">YOUR FAMILY’S VIRTUAL PET</p><h2>Charlie</h2><p>Charlie is a little friend who grows as your family spends time together. Finish any game, care for Charlie, or share a family story to help him grow.</p><div class="pet-growth-meter"><div class="pet-growth-label"><span>${esc(pet.stage)}</span><strong>${pet.progress} / 40</strong></div><div class="progress-track" role="progressbar" aria-label="Charlie’s growth to the next level" aria-valuemin="0" aria-valuemax="40" aria-valuenow="${pet.progress}"><div class="progress-fill" style="width:${progress}%"></div></div></div><div class="character-actions">${button('Play', 'activities', 'primary')}${button('Home', 'discover', 'secondary')}</div></div></section>${renderEvolutionJourney(pet)}<section class="character-roster"><div class="section-heading"><div><p class="eyebrow">ACTIVITY PREVIEW CAST</p><h2>Story characters</h2></div><span class="section-subtitle">Fictional demo profiles</span></div><p class="character-note">These sample characters show how a future community preview could look. They are not real people or live connections.</p><div class="grid character-grid">${PEOPLE.map(person => `<article class="card character-card"><div class="person-top"><div class="person-avatar person-${esc(person.generation)} color-${esc(person.color)}" aria-hidden="true">${esc(person.initials)}</div><div class="person-details"><h3>${esc(person.name)}</h3><span class="person-meta">${person.generation === 'senior' ? 'Grandparent generation' : 'Younger generation'} · ${person.age}</span></div></div><p>${esc(person.bio)}</p>${tags(person.interests)}</article>`).join('')}</div></section>`;
 }
 function renderWeeklyPetCard() {
   const week = getPetWeek(state);
-  if (!week) return `<section class="weekly-pet card"><div class="weekly-pet-icon" aria-hidden="true">💌</div><div class="weekly-pet-copy"><p class="eyebrow">CHARLIE’S WEEKLY QUESTION</p><h2>A question for someone you love</h2><p class="muted">Charlie has a new question to share with a grandparent. Pass this device to them when they are ready to answer.</p></div>${button('See this week’s question', 'pet-ask', 'primary')}</section>`;
+  if (!week) return `<section class="weekly-pet card"><div class="weekly-pet-icon" aria-hidden="true">💌</div><div class="weekly-pet-copy"><h2>A question for family</h2></div>${button('Open', 'pet-ask', 'primary')}</section>`;
   const answered = week.repliedAt !== null;
-  return `<section class="weekly-pet card ${answered ? 'weekly-pet-done' : ''}"><div class="weekly-pet-icon" aria-hidden="true">${answered ? '📖' : '💌'}</div><div class="weekly-pet-copy"><p class="eyebrow">${answered ? 'A STORY FOR CHARLIE' : 'CHARLIE’S WEEKLY QUESTION'}</p><h2>${answered ? 'A family story to keep' : 'Grandparent, your turn'}</h2><blockquote>${esc(PET_QUESTIONS.find(item => item.id === week.questionId)?.question || 'What story would you like to share with Charlie?')}</blockquote>${answered ? `<p class="muted">${week.replyText ? esc(week.replyText) : 'A voice story is saved on this device.'}</p>` : '<p class="muted">Hand over this device. Grandparent can type or record a short reply.</p>'}</div><div class="weekly-pet-actions">${answered ? button('Read or listen', 'pet-read-story', 'primary') : button('Grandparent reply', 'pet-reply', 'primary')}${answered ? button('Edit story', 'pet-reply', 'secondary small') : ''}</div></section>`;
+  return `<section class="weekly-pet card ${answered ? 'weekly-pet-done' : ''}"><div class="weekly-pet-icon" aria-hidden="true">${answered ? '📖' : '💌'}</div><div class="weekly-pet-copy"><h2>${answered ? 'A family story to keep' : 'This week’s question'}</h2>${answered ? `<p class="home-story-preview muted">${week.replyText ? esc(week.replyText) : 'Voice story saved.'}</p>` : `<blockquote class="home-story-preview">${esc(PET_QUESTIONS.find(item => item.id === week.questionId)?.question || '')}</blockquote>`}</div><div class="weekly-pet-actions">${answered ? button('Open', 'pet-read-story', 'primary') : button('Reply', 'pet-reply', 'primary')}</div></section>`;
 }
 function renderPetHome() {
   const pet = getPetStats(state);
   const progress = Math.round(pet.progress / 40 * 100);
   const theme = getDailyTheme(state);
   const themeDone = getJourneyStats(state).completedThemeToday;
-  return `<section class="pet-home card"><div class="pet-home-art">${renderPetArt(pet)}<span class="pet-level-badge">LEVEL ${pet.level}</span></div><div class="pet-home-copy"><p class="eyebrow">MEET YOUR FAMILY’S VIRTUAL PET</p><h1 class="page-title">Charlie</h1><p class="pet-stage">${esc(pet.stage)} · Every game helps Charlie grow.</p><p class="charlie-intro">Charlie is your family’s little friend. Play, care, and share stories together to help him grow.</p><div class="pet-growth-meter"><div class="pet-growth-label"><span>Growth</span><strong>${pet.progress} / 40</strong></div><div class="progress-track" role="progressbar" aria-label="Charlie’s growth to the next level" aria-valuemin="0" aria-valuemax="40" aria-valuenow="${pet.progress}"><div class="progress-fill" style="width:${progress}%"></div></div><p class="field-help">Games +10 · daily care +3 · a family story +15</p></div><div class="pet-home-actions">${button(pet.fedToday ? 'Fed today ✓' : 'Feed Charlie', 'pet-feed', pet.fedToday ? 'secondary' : 'primary', pet.fedToday ? 'disabled aria-label="Charlie has been fed today"' : '')}${button('Play a game', 'activities', 'primary')}</div></div></section>${renderWeeklyPetCard()}<div class="daily-journey-grid"><section class="daily-moment card ${themeDone ? 'daily-complete' : ''}" aria-labelledby="daily-title"><div class="icon-tile" aria-hidden="true">${themeDone ? '✓' : esc(theme.icon)}</div><p class="eyebrow">${themeDone ? 'THEME COMPLETE' : 'TODAY’S GAME'}</p><h2 id="daily-title">${esc(theme.title)}</h2><p class="muted">${esc(theme.description)}</p><div class="activity-meta"><span>${esc(theme.duration)}</span></div>${button(themeDone ? 'Play again' : 'Play today’s game', 'together-setup', 'primary', `data-id="${esc(theme.id)}"`)}</section>${renderSharedJourney()}</div><div class="pet-book-link">${button('Print this month’s storybook', 'storybook', 'secondary')}</div>`;
+  return `<section class="pet-home card"><div class="pet-home-art">${renderPetArt(pet)}<span class="pet-level-badge">LEVEL ${pet.level}</span></div><div class="pet-home-copy"><h1 class="page-title">Charlie</h1><p class="home-tagline">Grow closer through play.</p><div class="pet-growth-meter"><div class="pet-growth-label"><span>Growth</span><strong>${pet.progress} / 40</strong></div><div class="progress-track" role="progressbar" aria-label="Charlie’s growth to the next level" aria-valuemin="0" aria-valuemax="40" aria-valuenow="${pet.progress}"><div class="progress-fill" style="width:${progress}%"></div></div></div><div class="pet-home-actions">${button('Play', 'activities', 'primary')}${button(pet.fedToday ? 'Fed ✓' : 'Feed', 'pet-feed', 'secondary', pet.fedToday ? 'disabled aria-label="Charlie has been fed today"' : '')}</div></div></section>${renderWeeklyPetCard()}<section class="daily-moment card home-daily ${themeDone ? 'daily-complete' : ''}" aria-labelledby="daily-title"><div class="icon-tile" aria-hidden="true">${themeDone ? '✓' : esc(theme.icon)}</div><div><p class="eyebrow">${themeDone ? 'THEME COMPLETE' : 'TODAY’S GAME'}</p><h2 id="daily-title">${esc(theme.title)}</h2></div>${button(themeDone ? 'Replay' : 'Play', 'together-setup', 'secondary', `data-id="${esc(theme.id)}"`)}</section><div class="home-extras"><details class="home-moments"><summary>Your moments</summary>${renderSharedJourney()}</details>${button('Storybook', 'storybook', 'ghost')}</div>`;
 }
 function renderDiscover() {
   const profile = state.profile;
@@ -186,7 +263,7 @@ function renderDiscover() {
   const themeDone = getJourneyStats(state).completedThemeToday;
   return `${pet}
     <details class="secondary-content" id="community-details"><summary>Explore community previews</summary><section id="matches" aria-labelledby="matches-title"><div class="section-heading"><div><p class="eyebrow">EXPLORE THE WIDER COMMUNITY</p><h2 id="matches-title">Community preview</h2></div><span class="section-subtitle">Fictional demo profiles</span></div><p class="muted">Explore how shared interests could connect generations. These profiles and sessions are simulated; they are separate from a future trusted circle.</p>
-    ${isFamily() ? `<div class="card family-card"><div class="icon-tile">${esc(suggested.icon)}</div><div><h3>Your best company can be close to home.</h3><p class="muted">Family mode keeps community matching closed. Enjoy a guided activity with someone you already know on this device.</p></div>${button('Play together', 'together-setup', 'primary', `data-id="${esc(suggested.id)}"`)}</div>` : matches.length ? `<div class="grid match-grid">${matches.slice(0, 3).map(renderMatch).join('')}</div>` : `<div class="empty-state"><h3>A shared interest is a good place to start.</h3><p>Try adding another interest to find more sample profiles.</p>${button('Edit your interests', 'profile', 'primary')}</div>`}</section>
+    ${isFamily() ? `<div class="card family-card"><div class="icon-tile">${esc(suggested.icon)}</div><div><h3>Your best company can be close to home.</h3><p class="muted">Family mode keeps community matching closed. Enjoy a guided activity with someone you already know on this device.</p></div>${button('Together', 'together-setup', 'primary', `data-id="${esc(suggested.id)}"`)}</div>` : matches.length ? `<div class="grid match-grid">${matches.slice(0, 3).map(renderMatch).join('')}</div>` : `<div class="empty-state"><h3>A shared interest is a good place to start.</h3><p>Try adding another interest to find more sample profiles.</p>${button('Edit interests', 'profile', 'primary')}</div>`}</section>
     <section aria-labelledby="groups-title"><div class="section-heading"><div><p class="eyebrow">MORE WAYS TO SHARE WHAT YOU LOVE</p><h2 id="groups-title">Interest circles, in preview.</h2></div><span class="section-subtitle">Sample groups</span></div><div class="group-preview-grid grid">${groups.map(renderGroup).join('')}</div></section></details>`;
 }
 function renderStorybook() {
@@ -204,15 +281,15 @@ function renderStorybook() {
     const people = review.mode === 'in-person' ? review.participants.map(item => item.name).join(' & ') : review.personId ? `With ${person(review.personId)?.name || 'a sample friend'}` : 'Together';
     return `<article class="storybook-moment"><span class="storybook-icon" aria-hidden="true">${esc(activity?.icon || '✦')}</span><div><p class="eyebrow">${dateLabel(review.completedAt)}</p><h3>${esc(activity?.title || 'A shared game')}</h3><p>${esc(people)} played together. Charlie grew with every answer, story, and laugh.</p></div></article>`;
   }).join('') : '<p class="storybook-empty">This month’s adventures will appear here after you play a game together.</p>';
-  const stories = monthWeeks.length ? monthWeeks.map(week => `<article class="storybook-story"><p class="eyebrow">A FAMILY STORY · ${dateLabel(week.repliedAt)}</p><h3>${esc(PET_QUESTIONS.find(item => item.id === week.questionId)?.question || 'A question for the family')}</h3>${week.replyText ? `<blockquote>${esc(week.replyText)}</blockquote>` : '<p>A voice story was saved on this device.</p>'}${week.voiceNoteId ? `<div class="storybook-audio-row">${button('Load voice story', 'play-story-audio', 'secondary small', `data-id="${esc(week.voiceNoteId)}"`)}<audio class="storybook-audio" controls preload="none" aria-label="Recorded family story"></audio></div>` : ''}</article>`).join('') : '<p class="storybook-empty">Charlie is waiting for this month’s family story.</p>';
+  const stories = monthWeeks.length ? monthWeeks.map(week => `<article class="storybook-story"><p class="eyebrow">A FAMILY STORY · ${dateLabel(week.repliedAt)}</p><h3>${esc(PET_QUESTIONS.find(item => item.id === week.questionId)?.question || 'A question for the family')}</h3>${week.replyText ? `<blockquote>${esc(week.replyText)}</blockquote>` : '<p>A voice story was saved on this device.</p>'}${week.voiceNoteId ? `<div class="storybook-audio-row">${button('Load audio', 'play-story-audio', 'secondary small', `data-id="${esc(week.voiceNoteId)}"`)}<audio class="storybook-audio" controls preload="none" aria-label="Recorded family story"></audio></div>` : ''}</article>`).join('') : '<p class="storybook-empty">Charlie is waiting for this month’s family story.</p>';
   const decorationItems = pet.unlockedDecorations.map(item => `<li><span aria-hidden="true">${esc(item.icon)}</span> ${esc(item.name)}</li>`).join('');
-  return `<div class="storybook-toolbar">${button('Back to Charlie', 'navigate', 'ghost', 'data-page="discover"')}${button('Print storybook', 'print-storybook', 'primary')}</div><article class="storybook-page"><header class="storybook-cover"><span class="eyebrow">A LITTLE BOOK OF SHARED MOMENTS</span><div class="storybook-cover-art">${renderPetArt(pet)}</div><h1>Our month with Charlie</h1><p>${esc(monthLabel)} · Level ${pet.level} · ${esc(pet.stage)}</p><div class="storybook-growth">Charlie grew by <strong>${growthThisMonth}</strong> points this month, across games, care, and family stories.</div></header><section class="storybook-section"><h2>Our adventures</h2>${moments}</section><section class="storybook-section"><h2>Stories we shared</h2>${stories}</section><section class="storybook-section storybook-room"><h2>Charlie’s room</h2><p>Look how much our little friend has grown.</p><ul>${decorationItems || '<li>Charlie’s first cozy room</li>'}</ul></section><footer class="storybook-footer">Made together, one small moment at a time. · GrandPals</footer></article>`;
+  return `<div class="storybook-toolbar">${button('Home', 'navigate', 'ghost', 'data-page="discover"')}${button('Print', 'print-storybook', 'primary')}</div><article class="storybook-page"><header class="storybook-cover"><span class="eyebrow">A LITTLE BOOK OF SHARED MOMENTS</span><div class="storybook-cover-art">${renderPetArt(pet)}</div><h1>Our month with Charlie</h1><p>${esc(monthLabel)} · Level ${pet.level} · ${esc(pet.stage)}</p><div class="storybook-growth">Charlie grew by <strong>${growthThisMonth}</strong> points this month, across games, care, and family stories.</div></header><section class="storybook-section"><h2>Our adventures</h2>${moments}</section><section class="storybook-section"><h2>Stories we shared</h2>${stories}</section><section class="storybook-section storybook-room"><h2>Charlie’s room</h2><p>Look how much our little friend has grown.</p><ul>${decorationItems || '<li>Charlie’s first cozy room</li>'}</ul></section><footer class="storybook-footer">Made together, one small moment at a time. · GrandPals</footer></article>`;
 }
 function showTrustedPreview() {
-  showDialog(`${dialogHeading('TRUSTED CIRCLE · FUTURE REMOTE CONNECTIONS', 'Keep familiar people close.')}<p class="muted">The trusted circle is designed around people you already know: family members and connections a parent or guardian has approved.</p><div class="notice">This is a preview of the idea. Trusted invitations, verified guardian approval, scheduling, and remote calls are not available in this prototype.</div><p>For now, play face to face and keep both people’s reflections in your shared journey. The separate community preview uses fictional profiles to demonstrate matching and guided activities.</p><div class="form-actions">${button('Explore community preview', 'community-preview', 'secondary')}${button('Play together now', 'together-setup', 'primary')}</div>`);
+  showDialog(`${dialogHeading('TRUSTED CIRCLE · FUTURE REMOTE CONNECTIONS', 'Keep familiar people close.')}<p class="muted">The trusted circle is designed around people you already know: family members and connections a parent or guardian has approved.</p><div class="notice">This is a preview of the idea. Trusted invitations, verified guardian approval, scheduling, and remote calls are not available in this prototype.</div><p>For now, play face to face and keep both people’s reflections in your shared journey. The separate community preview uses fictional profiles to demonstrate matching and guided activities.</p><div class="form-actions">${button('Preview', 'community-preview', 'secondary')}${button('Play', 'together-setup', 'primary')}</div>`);
 }
 function renderMatch(p) {
-  return `<article class="card match-card"><div class="person-top"><div class="person-avatar person-${esc(p.generation)} color-${esc(p.color)}" aria-hidden="true">${esc(p.initials)}</div><div class="person-details"><h3>${esc(p.name)} <span class="person-age">${p.age}</span></h3><span class="person-meta">${p.generation === 'senior' ? 'A lifetime of stories' : 'A fresh perspective'}</span></div><span class="sample-label">Sample</span></div><p class="person-bio">${esc(p.bio)}</p>${tags(p.sharedInterests || p.interests.slice(0, 2))}<div class="match-reason"><span aria-hidden="true">✦</span> ${esc(p.reason || 'Create your profile to discover shared interests.')}</div><div class="card-footer"><span class="person-meta">${esc(p.availability)}</span>${button(`Try a demo ${icon('arrow')}`, 'connect', 'secondary small', `data-id="${esc(p.id)}"`)}</div></article>`;
+  return `<article class="card match-card"><div class="person-top"><div class="person-avatar person-${esc(p.generation)} color-${esc(p.color)}" aria-hidden="true">${esc(p.initials)}</div><div class="person-details"><h3>${esc(p.name)} <span class="person-age">${p.age}</span></h3><span class="person-meta">${p.generation === 'senior' ? 'A lifetime of stories' : 'A fresh perspective'}</span></div><span class="sample-label">Sample</span></div><p class="person-bio">${esc(p.bio)}</p>${tags(p.sharedInterests || p.interests.slice(0, 2))}<div class="match-reason"><span aria-hidden="true">✦</span> ${esc(p.reason || 'Create your profile to discover shared interests.')}</div><div class="card-footer"><span class="person-meta">${esc(p.availability)}</span>${button(`Preview ${icon('arrow')}`, 'connect', 'secondary small', `data-id="${esc(p.id)}"`)}</div></article>`;
 }
 function renderGroup(group) {
   const joined = state.joinedGroups.includes(group.id);
@@ -221,6 +298,7 @@ function renderGroup(group) {
 function renderActivities() {
   const played = new Set(state.reviews.map(review => review.activityId));
   const modes = [
+    { kind: 'sticks', title: 'Pick Up Sticks', icon: '🥢', description: 'A Singapore childhood favourite. Lift top sticks without disturbing the pile. Play solo or share the table.' },
     { kind: 'quiz', title: 'Quiz', icon: '🧠', description: 'Take turns on Singapore trivia and playful brain teasers.' },
     { kind: 'conversation', title: 'Guided Talk', icon: '💬', description: 'Easy questions about family, memories, and everyday life.' },
     { kind: 'random', title: 'Random Talk', icon: '🎁', description: 'Get a surprise question and see where it takes you.' },
@@ -229,19 +307,20 @@ function renderActivities() {
     { kind: 'reflection', title: 'Then & Now', icon: '⌛', description: 'Share what has changed and what still feels the same.' },
     { kind: 'walk', title: 'Walk with Charlie', icon: '👟', description: 'Take a safe little walk or imagine one together. No GPS is used.' },
   ];
-  return `<div class="activity-welcome"><div class="page-heading"><div><p class="eyebrow">PLAY, TALK, AND GROW TOGETHER</p><h1 class="page-title">Choose a game</h1><p class="muted">Charlie grows every time you finish a game together.</p></div></div>${renderCharlieMascot()}</div><div class="grid activity-grid">${modes.map(mode => { const items = ACTIVITIES.filter(activity => activity.kind === mode.kind); const fresh = items.filter(activity => !played.has(activity.id)).length; return `<article class="card activity-card"><div class="activity-card-top"><span class="icon-tile" aria-hidden="true">${mode.icon}</span><span class="activity-type">${fresh ? `${fresh} NEW` : 'REPLAY'}</span></div><h2>${mode.title}</h2><p class="muted">${mode.description}</p><div class="activity-actions">${button('Play together', 'together-mode', 'primary', `data-kind="${mode.kind}"`)}${button('Try solo', 'start-random-activity', 'secondary', `data-kind="${mode.kind}"`)}</div></article>`; }).join('')}</div>`;
+  return `<div class="activity-welcome"><div class="page-heading"><div><p class="eyebrow">PLAY, TALK, AND GROW TOGETHER</p><h1 class="page-title">Choose a game</h1><p class="muted">Charlie grows every time you finish a game together.</p></div></div>${renderCharlieMascot()}</div><div class="grid activity-grid">${modes.map(mode => { const items = ACTIVITIES.filter(activity => activity.kind === mode.kind); const fresh = items.filter(activity => !played.has(activity.id)).length; return `<article class="card activity-card"><div class="activity-card-top"><span class="icon-tile" aria-hidden="true">${mode.icon}</span><span class="activity-type">${fresh ? `${fresh} NEW` : 'REPLAY'}</span></div><h2>${mode.title}</h2><p class="muted">${mode.description}</p><div class="activity-actions">${button('Together', 'together-mode', 'primary', `data-kind="${mode.kind}"`)}${button('Solo', 'start-random-activity', 'secondary', `data-kind="${mode.kind}"`)}</div></article>`; }).join('')}</div>`;
 }
 function renderCircle() {
-  if (!state.profile && !state.reviews.length && !state.petJourney.fedDates.length && !state.petJourney.weeks.length) return `<div class="page-heading"><div><p class="eyebrow">GOOD COMPANY GROWS HERE</p><h1 class="page-title">Your little circle<span class="greeting-dot">.</span></h1></div></div><div class="empty-state"><span class="empty-icon" aria-hidden="true">♡</span><h2>A place for familiar faces.</h2><p>Play face to face to save your shared moments here. A profile is only needed to explore sample community connections.</p>${button('Play face to face', 'together-setup', 'primary')}${button('Create your profile', 'profile', 'primary')}</div>`;
+  if (!state.profile && !state.reviews.length && !state.petJourney.fedDates.length && !state.petJourney.weeks.length) return `<div class="page-heading"><div><p class="eyebrow">GOOD COMPANY GROWS HERE</p><h1 class="page-title">Your little circle<span class="greeting-dot">.</span></h1></div></div><div class="empty-state"><span class="empty-icon" aria-hidden="true">♡</span><h2>A place for familiar faces.</h2><p>Play face to face to save your shared moments here. A profile is only needed to explore sample community connections.</p>${button('Together', 'together-setup', 'primary')}${button('Create profile', 'profile', 'primary')}</div>`;
   const friends = PEOPLE.filter(p => state.friends.includes(p.id));
   const groups = GROUPS.filter(g => state.joinedGroups.includes(g.id));
-  return `<div class="page-heading"><div><p class="eyebrow">FAMILIAR FACES. SHARED LITTLE JOYS.</p><h1 class="page-title">Your little circle<span class="greeting-dot">.</span></h1><p class="muted">Your shared moments, saved connections, and interest groups, on this device.</p></div></div>${renderSharedJourney(false)}${state.profile ? `<section><div class="section-heading"><h2>Sample connections <span class="count-label">${friends.length}</span></h2><span class="muted">Saved on this device</span></div>${friends.length ? `<div class="grid match-grid">${friends.map(renderMatch).join('')}</div>` : `<div class="card empty-state"><span class="empty-icon" aria-hidden="true">♡</span><h3>${isFamily() ? 'Your best company is close to home.' : 'Every friendship starts with a hello.'}</h3><p>${isFamily() ? 'Family mode offers shared activities with someone beside you.' : 'Complete a simulated activity and choose “Add to my circle” in your review.'}</p>${button(isFamily() ? 'Explore activities' : 'Discover people', isFamily() ? 'activities' : 'discover', 'secondary')}</div>`}</section><section><div class="section-heading"><h2>Your interest groups <span class="count-label">${groups.length}</span></h2></div>${groups.length ? `<div class="group-list">${groups.map(renderGroup).join('')}</div>` : `<div class="card empty-state"><h3>Find people who love what you love.</h3><p>Join a sample interest group to add it here. Live group discussions are not part of this demo.</p>${button('Explore groups', 'discover', 'secondary')}</div>`}</section>` : `<div class="notice">Your face-to-face sessions stay on this device. ${button('Settings & reset', 'profile', 'ghost small')}</div>`}<section><div class="section-heading"><h2>Moments you’ve made</h2></div>${state.reviews.length ? `<div class="circle-list">${state.reviews.slice().reverse().map(review => review.mode === 'in-person' ? renderTogetherHistory(review) : `<article class="card review-card"><div class="icon-tile" aria-hidden="true">${esc(ACTIVITIES.find(a => a.id === review.activityId)?.icon || '✦')}</div><div><h3>${esc(ACTIVITIES.find(a => a.id === review.activityId)?.title || 'Shared activity')}</h3><p class="muted">${review.personId ? `With ${esc(person(review.personId)?.name || 'a sample friend')}` : 'A moment for yourself or family'} · <span aria-label="${review.rating} out of 5 stars">${'★'.repeat(review.rating)}${'☆'.repeat(5 - review.rating)}</span></p>${review.note ? `<p>${esc(review.note)}</p>` : ''}</div><span class="points-earned">+30 points</span></article>`).join('')}</div>` : '<p class="muted">Your completed activities and reflections will appear here.</p>'}</section>`;
+  return `<div class="page-heading"><div><p class="eyebrow">FAMILIAR FACES. SHARED LITTLE JOYS.</p><h1 class="page-title">Your little circle<span class="greeting-dot">.</span></h1><p class="muted">Your shared moments, saved connections, and interest groups, on this device.</p></div></div>${renderSharedJourney(false)}${state.profile ? `<section><div class="section-heading"><h2>Sample connections <span class="count-label">${friends.length}</span></h2><span class="muted">Saved on this device</span></div>${friends.length ? `<div class="grid match-grid">${friends.map(renderMatch).join('')}</div>` : `<div class="card empty-state"><span class="empty-icon" aria-hidden="true">♡</span><h3>${isFamily() ? 'Your best company is close to home.' : 'Every friendship starts with a hello.'}</h3><p>${isFamily() ? 'Family mode offers shared activities with someone beside you.' : 'Complete a simulated activity and choose “Add to my circle” in your review.'}</p>${button(isFamily() ? 'Activities' : 'Discover', isFamily() ? 'activities' : 'discover', 'secondary')}</div>`}</section><section><div class="section-heading"><h2>Your interest groups <span class="count-label">${groups.length}</span></h2></div>${groups.length ? `<div class="group-list">${groups.map(renderGroup).join('')}</div>` : `<div class="card empty-state"><h3>Find people who love what you love.</h3><p>Join a sample interest group to add it here. Live group discussions are not part of this demo.</p>${button('Groups', 'discover', 'secondary')}</div>`}</section>` : `<div class="notice">Your face-to-face sessions stay on this device. ${button('Settings', 'profile', 'ghost small')}</div>`}<section><div class="section-heading"><h2>Moments you’ve made</h2></div>${state.reviews.length ? `<div class="circle-list">${state.reviews.slice().reverse().map(review => review.mode === 'in-person' ? renderTogetherHistory(review) : `<article class="card review-card"><div class="icon-tile" aria-hidden="true">${esc(ACTIVITIES.find(a => a.id === review.activityId)?.icon || '✦')}</div><div><h3>${esc(ACTIVITIES.find(a => a.id === review.activityId)?.title || 'Shared activity')}</h3><p class="muted">${review.personId ? `With ${esc(person(review.personId)?.name || 'a sample friend')}` : 'A moment for yourself or family'} · <span aria-label="${review.rating} out of 5 stars">${'★'.repeat(review.rating)}${'☆'.repeat(5 - review.rating)}</span></p>${review.stickScores ? `<p>${review.stickScores.reduce((sum, score) => sum + score, 0)} stick points · ${review.stickCount} sticks cleared</p>` : ''}${review.note ? `<p>${esc(review.note)}</p>` : ''}</div><span class="points-earned">+30 points</span></article>`).join('')}</div>` : '<p class="muted">Your completed activities and reflections will appear here.</p>'}</section>`;
 }
 function renderRewards() {
-  return `<div class="page-heading"><div><p class="eyebrow">LITTLE MOMENTS DESERVE A LITTLE THANK YOU</p><h1 class="page-title">Kindness comes around<span class="greeting-dot">.</span></h1><p class="muted">Collect points for showing up and sharing time together.</p></div></div><section class="balance-card"><div><span class="eyebrow">THIS DEVICE’S KINDNESS POINTS</span><div class="balance-value"><span aria-hidden="true">✦</span> ${state.points}</div><p>Complete a face-to-face activity to earn 30 shared points.</p></div>${button('Make another moment', 'activities', 'primary')}</section><div class="notice">These are sample rewards for exploring the prototype. Vouchers have no monetary value and cannot be used at real businesses.</div><div class="section-heading"><h2>A little something for you</h2><span class="section-subtitle">Demo rewards</span></div><div class="grid reward-grid">${REWARDS.map(reward => `<article class="card reward-card"><div class="reward-art" aria-hidden="true">${esc(reward.icon)}</div><span class="eyebrow">SAMPLE VOUCHER</span><h2>${esc(reward.name)}</h2><p class="muted">${esc(reward.description)}</p><div class="card-footer"><span class="reward-cost">✦ ${reward.cost} points</span>${button('Redeem', 'redeem', 'secondary small', `data-id="${esc(reward.id)}" ${state.points < reward.cost ? 'disabled' : ''} aria-label="Redeem ${esc(reward.name)} for ${reward.cost} points"`)}</div>${state.points < reward.cost ? `<p class="field-help">${reward.cost - state.points} more points to go</p>` : ''}</article>`).join('')}</div><section><div class="section-heading"><h2>Your sample vouchers</h2></div>${state.redemptions.length ? `<div class="voucher-list">${state.redemptions.slice().reverse().map(item => `<article class="card voucher-item"><div><h3>${esc(REWARDS.find(r => r.id === item.rewardId)?.name || 'Sample reward')}</h3><p class="muted">Demo only · no cash value · ${item.cost} points</p></div><code class="voucher-code">${esc(item.code)}</code></article>`).join('')}</div>` : '<div class="card empty-state"><h3>Something to look forward to.</h3><p>Your redeemed sample vouchers will be saved here.</p></div>'}</section>`;
+  return `<div class="page-heading"><div><p class="eyebrow">LITTLE MOMENTS DESERVE A LITTLE THANK YOU</p><h1 class="page-title">Kindness comes around<span class="greeting-dot">.</span></h1><p class="muted">Collect points for showing up and sharing time together.</p></div></div><section class="balance-card"><div><span class="eyebrow">THIS DEVICE’S KINDNESS POINTS</span><div class="balance-value"><span aria-hidden="true">✦</span> ${state.points}</div><p>Complete a face-to-face activity to earn 30 shared points.</p></div>${button('Play', 'activities', 'primary')}</section><div class="notice">These are sample rewards for exploring the prototype. Vouchers have no monetary value and cannot be used at real businesses.</div><div class="section-heading"><h2>A little something for you</h2><span class="section-subtitle">Demo rewards</span></div><div class="grid reward-grid">${REWARDS.map(reward => `<article class="card reward-card"><div class="reward-art" aria-hidden="true">${esc(reward.icon)}</div><span class="eyebrow">SAMPLE VOUCHER</span><h2>${esc(reward.name)}</h2><p class="muted">${esc(reward.description)}</p><div class="card-footer"><span class="reward-cost">✦ ${reward.cost} points</span>${button('Redeem', 'redeem', 'secondary small', `data-id="${esc(reward.id)}" ${state.points < reward.cost ? 'disabled' : ''} aria-label="Redeem ${esc(reward.name)} for ${reward.cost} points"`)}</div>${state.points < reward.cost ? `<p class="field-help">${reward.cost - state.points} more points to go</p>` : ''}</article>`).join('')}</div><section><div class="section-heading"><h2>Your sample vouchers</h2></div>${state.redemptions.length ? `<div class="voucher-list">${state.redemptions.slice().reverse().map(item => `<article class="card voucher-item" data-voucher-id="${esc(item.id)}"><div><h3>${esc(REWARDS.find(r => r.id === item.rewardId)?.name || 'Sample reward')}</h3><p class="muted">Demo only · no cash value · ${item.cost} points</p></div><code class="voucher-code" tabindex="-1">${esc(item.code)}</code></article>`).join('')}</div>` : '<div class="card empty-state"><h3>Something to look forward to.</h3><p>Your redeemed sample vouchers will be saved here.</p></div>'}</section>`;
 }
 
 function showDialog(content, { wide = false, initialFocus = null, className = '' } = {}) {
+  pendingRewardId = null;
   if (!dialogRoot.firstElementChild) returnFocus = document.activeElement;
   releaseVoiceObjectUrl();
   dialogRoot.innerHTML = `<div class="modal-backdrop"><section class="modal ${wide ? 'session-modal' : ''} ${className}" role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabindex="-1">${content}</section></div>`;
@@ -252,6 +331,7 @@ function showDialog(content, { wide = false, initialFocus = null, className = ''
   if (!modal.contains(document.activeElement)) modal.focus();
 }
 function closeDialog() {
+  pendingRewardId = null;
   releaseVoiceObjectUrl();
   dialogRoot.innerHTML = '';
   app.inert = false;
@@ -262,20 +342,31 @@ function closeDialog() {
 function dialogHeading(eyebrow, title) {
   return `<div class="modal-heading"><div><p class="eyebrow">${eyebrow}</p><h2 id="dialog-title">${title}</h2></div><button type="button" class="modal-close" data-action="close-dialog" aria-label="Close dialog">${icon('close')}</button></div>`;
 }
+function showRewardCelebration(reward, voucher) {
+  clearTimeout(toastTimer);
+  status.classList.remove('visible');
+  const confetti = Array.from({ length: 36 }, (_, index) => `<span style="--paper-x:${(index * 37 + 7) % 100}%;--paper-drift:${(index * 43) % 150 - 75}px;--paper-delay:${.45 + (index % 9) * .09}s;--paper-duration:${4.2 + (index % 5) * .22}s;--paper-spin:${360 + (index % 6) * 95}deg"></span>`).join('');
+  showDialog(`<div class="reward-confetti" aria-hidden="true">${confetti}</div><div class="reward-celebration"><p class="eyebrow">A LITTLE THANK YOU</p><h2 id="dialog-title">Your reward is ready!</h2>
+    <div class="reward-reveal" aria-hidden="true"><div class="reward-halo"></div>
+      <svg class="reward-gift" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><g class="reward-gift-box"><rect x="40" y="89" width="120" height="88" rx="12" fill="#e7b66b"/><path d="M88 89h24v88H88Z" fill="#61876c"/><path d="M48 164h104" stroke="#cf9a53" stroke-width="4" stroke-linecap="round"/></g><g class="reward-gift-lid"><path d="M99 70C51 70 60 22 82 42c10 9 16 27 17 28Zm2 0c48 0 39-48 17-28-10 9-16 27-17 28Z" fill="#93b58a" stroke="#61876c" stroke-width="4"/><rect x="32" y="70" width="136" height="30" rx="9" fill="#f0cd91"/><path d="M88 70h24v30H88Z" fill="#61876c"/></g></svg>
+      <div class="reward-ticket"><span class="reward-ticket-icon">${esc(reward.icon)}</span><span class="reward-ticket-label">SAMPLE VOUCHER</span><span class="reward-ticket-check">✓</span></div>
+      <div class="reward-sparkles">${Array.from({ length: 6 }, () => '<span>✦</span>').join('')}</div>
+    </div><h3>${esc(reward.name)}</h3><code class="voucher-code">${esc(voucher.code)}</code><p class="reward-balance">${voucher.cost} points used · ${state.points} points left</p><p class="reward-demo-note">Demo voucher · no cash value</p>${button('View', 'reward-view', 'primary', `data-id="${esc(voucher.id)}"`)}</div>`, { className: 'reward-celebration-modal', initialFocus: '[data-action="reward-view"]' });
+}
 function showProfile() {
   const profile = state.profile;
-  showDialog(`${dialogHeading(profile ? 'MAKE YOURSELF AT HOME' : 'LET’S START WITH YOU', profile ? 'Your profile & settings' : 'A few things in common.')}<form id="profile-form"><div class="form-row"><div class="form-field"><label for="profile-name">Your nickname</label><input id="profile-name" name="name" autocomplete="nickname" required maxlength="40" value="${esc(profile?.name || '')}" placeholder="What should we call you?"></div><div class="form-field age-field"><label for="profile-age">Your age</label><input id="profile-age" name="age" type="number" min="6" max="110" required value="${profile?.age || ''}" inputmode="numeric" placeholder="e.g. 24"></div></div><fieldset class="form-field"><legend>What lights you up?</legend><p class="field-help">Choose one or more interests. We’ll find the things you share.</p><div class="choice-grid">${INTERESTS.map(item => `<label class="choice ${profile?.interests.includes(item.id) ? 'selected' : ''}"><input class="interest-check" type="checkbox" name="interests" value="${esc(item.id)}" ${profile?.interests.includes(item.id) ? 'checked' : ''}><span aria-hidden="true">${esc(item.icon)}</span> ${esc(item.label)}</label>`).join('')}</div></fieldset><label class="consent-field"><input name="guardianConsent" type="checkbox" ${profile?.guardianConsent ? 'checked' : ''}><span>A parent or guardian is involved and agrees to exploring the community demo.<small>For ages 12–17. Under 12 always uses family mode, with activities at home.</small></span></label><p class="field-help">Ages 12–17 without guardian involvement also use family mode. This is a prototype setting, not a verified consent process.</p><p class="form-error" id="profile-error" role="alert"></p><div class="form-actions">${hasSavedExperience() ? button('Reset demo data', 'reset-confirm', 'ghost danger') : ''}<button class="button primary" type="submit">${profile ? 'Save profile' : 'Find my kind of people'} ${icon('arrow')}</button>${button('Display & reading', 'display-settings', 'ghost')}</div></form>`, { initialFocus: '#profile-name' });
+  showDialog(`${dialogHeading(profile ? 'MAKE YOURSELF AT HOME' : 'LET’S START WITH YOU', profile ? 'Your profile & settings' : 'A few things in common.')}<form id="profile-form"><div class="form-row"><div class="form-field"><label for="profile-name">Your nickname</label><input id="profile-name" name="name" autocomplete="nickname" required maxlength="40" value="${esc(profile?.name || '')}" placeholder="What should we call you?"></div><div class="form-field age-field"><label for="profile-age">Your age</label><input id="profile-age" name="age" type="number" min="6" max="110" required value="${profile?.age || ''}" inputmode="numeric" placeholder="e.g. 24"></div></div><fieldset class="form-field"><legend>What lights you up?</legend><p class="field-help">Choose one or more interests. We’ll find the things you share.</p><div class="choice-grid">${INTERESTS.map(item => `<label class="choice ${profile?.interests.includes(item.id) ? 'selected' : ''}"><input class="interest-check" type="checkbox" name="interests" value="${esc(item.id)}" ${profile?.interests.includes(item.id) ? 'checked' : ''}><span aria-hidden="true">${esc(item.icon)}</span> ${esc(item.label)}</label>`).join('')}</div></fieldset><label class="consent-field"><input name="guardianConsent" type="checkbox" ${profile?.guardianConsent ? 'checked' : ''}><span>A parent or guardian is involved and agrees to exploring the community demo.<small>For ages 12–17. Under 12 always uses family mode, with activities at home.</small></span></label><p class="field-help">Ages 12–17 without guardian involvement also use family mode. This is a prototype setting, not a verified consent process.</p><p class="form-error" id="profile-error" role="alert"></p><div class="form-actions">${hasSavedExperience() ? button('Reset', 'reset-confirm', 'ghost danger') : ''}<button class="button primary" type="submit">${profile ? 'Save' : 'Create'} ${icon('arrow')}</button>${button('Display', 'display-settings', 'ghost')}</div></form>`, { initialFocus: '#profile-name' });
 }
 
 function showDisplaySettings() {
   const sizes = [['comfortable', 'Comfortable'], ['large', 'Large'], ['extra-large', 'Extra large']];
-  showDialog(`${dialogHeading('DISPLAY & READING', 'Make this easier to read.')}<fieldset class="form-field text-size-options"><legend>Text size</legend><div class="text-size-grid">${sizes.map(([value, label]) => `<button type="button" class="button ${preferences.textSize === value ? 'primary' : 'secondary'}" data-action="text-size" data-size="${value}" aria-pressed="${preferences.textSize === value}">${label}</button>`).join('')}</div></fieldset><label class="consent-field reading-toggle"><input id="auto-read-toggle" type="checkbox" ${preferences.autoRead ? 'checked' : ''} ${speechAvailable() ? '' : 'disabled'}><span>Read prompts aloud automatically<small>${speechAvailable() ? 'The device reads each new question or prompt in English.' : 'Read aloud is not available in this browser.'}</small></span></label><p class="field-help">Your display and reading choices are saved only on this device.</p>${button('Test read aloud', 'test-read-aloud', 'secondary', speechAvailable() ? '' : 'disabled')}<div class="form-actions">${button('Back to profile', 'profile', 'primary')}</div>`);
+  showDialog(`${dialogHeading('DISPLAY & READING', 'Make this easier to read.')}<fieldset class="form-field text-size-options"><legend>Text size</legend><div class="text-size-grid">${sizes.map(([value, label]) => `<button type="button" class="button ${preferences.textSize === value ? 'primary' : 'secondary'}" data-action="text-size" data-size="${value}" aria-pressed="${preferences.textSize === value}">${label}</button>`).join('')}</div></fieldset><label class="consent-field reading-toggle"><input id="auto-read-toggle" type="checkbox" ${preferences.autoRead ? 'checked' : ''} ${speechAvailable() ? '' : 'disabled'}><span>Read prompts aloud automatically<small>${speechAvailable() ? 'The device reads each new question or prompt in English.' : 'Read aloud is not available in this browser.'}</small></span></label><p class="field-help">Your display and reading choices are saved only on this device.</p>${button('Test', 'test-read-aloud', 'secondary', speechAvailable() ? '' : 'disabled')}<div class="form-actions">${button('Back', page === 'settings' ? 'close-dialog' : 'profile', 'primary')}</div>`);
 }
 
 function showPetQuestionDialog(week = getPetWeek(state)) {
   if (!week) return;
   const question = PET_QUESTIONS.find(item => item.id === week.questionId)?.question || 'What story would you like to share with Charlie?';
-  showDialog(`${dialogHeading('CHARLIE’S QUESTION', 'A little question for family.')}<div class="pet-question-panel"><span class="pet-question-illustration" aria-hidden="true">💌</span><blockquote>${esc(question)}</blockquote><p>Ask this in person, or pass this device to a grandparent. Replies are saved only here.</p></div><div class="form-actions">${button('Not now', 'close-dialog', 'ghost')}${button('Grandparent, reply', 'pet-reply', 'primary')}</div>`, { className: 'pet-question-modal' });
+  showDialog(`${dialogHeading('CHARLIE’S QUESTION', 'A little question for family.')}<div class="pet-question-panel"><span class="pet-question-illustration" aria-hidden="true">💌</span><blockquote>${esc(question)}</blockquote><p>Ask this in person, or pass this device to a grandparent. Replies are saved only here.</p></div><div class="form-actions">${button('Later', 'close-dialog', 'ghost')}${button('Reply', 'pet-reply', 'primary')}</div>`, { className: 'pet-question-modal' });
 }
 
 function showPetReplyDialog() {
@@ -285,16 +376,16 @@ function showPetReplyDialog() {
   const question = PET_QUESTIONS.find(item => item.id === week.questionId)?.question || 'What story would you like to share with Charlie?';
   const recording = voiceRecorder?.state === 'recording';
   const voiceControls = canRecordVoiceNote() || recording || pendingVoiceBlob || week.voiceNoteId
-    ? `<div class="voice-note-box"><p class="eyebrow">OPTIONAL VOICE STORY</p><p class="muted">Record a short reply on this device. It is not uploaded.</p><div class="voice-note-actions">${button(recording ? 'Recording…' : pendingVoiceBlob ? 'Record again' : 'Record a voice reply', 'voice-start', 'secondary', recording ? 'disabled' : '')}${recording ? button('Stop recording', 'voice-stop', 'primary') : ''}${week.voiceNoteId ? button('Play saved story', 'voice-play', 'ghost small', `data-id="${esc(week.voiceNoteId)}"`) : ''}</div>${pendingVoiceBlob ? '<p class="voice-status" role="status">Voice reply ready. Save the story to keep it on this device.</p>' : recording ? '<p class="voice-status" role="status">Recording now. Tap Stop recording when you are finished.</p>' : ''}<audio id="pet-audio-player" controls hidden aria-label="Saved family voice story"></audio></div>`
+    ? `<div class="voice-note-box"><p class="eyebrow">OPTIONAL VOICE STORY</p><p class="muted">Record a short reply on this device. It is not uploaded.</p><div class="voice-note-actions">${button(recording ? 'Recording…' : 'Record', 'voice-start', 'secondary', recording ? 'disabled' : '')}${recording ? button('Stop', 'voice-stop', 'primary') : ''}${week.voiceNoteId ? button('Load audio', 'voice-play', 'ghost small', `data-id="${esc(week.voiceNoteId)}"`) : ''}</div>${pendingVoiceBlob ? '<p class="voice-status" role="status">Voice reply ready. Save the story to keep it on this device.</p>' : recording ? '<p class="voice-status" role="status">Recording now. Tap Stop when you are finished.</p>' : ''}<audio id="pet-audio-player" controls hidden aria-label="Saved family voice story"></audio></div>`
     : '<div class="notice">Voice recording is not available here. A written reply works just as well.</div>';
-  showDialog(`${dialogHeading('GRANDPARENT’S TURN', 'Share a little story.')}<div class="pet-question-quote"><span class="eyebrow">CHARLIE ASKED</span><p>${esc(question)}</p></div><form id="pet-reply-form" data-week="${esc(week.weekStart)}"><div class="form-field"><label for="pet-reply-text">Your story <span class="muted">(optional if you record)</span></label><textarea id="pet-reply-text" name="replyText" maxlength="1600" rows="5" placeholder="A short memory, a favourite game, or a kind thought…">${esc(petReplyDraft)}</textarea><span class="field-help">A nickname or first name only, please. This stays on this device.</span></div>${voiceControls}<p class="form-error" id="pet-reply-error" role="alert"></p><div class="form-actions">${button('Save story', 'pet-reply-save', 'primary', recording ? 'disabled' : '')}</div></form>`, { className: 'pet-reply-modal', initialFocus: '#pet-reply-text' });
+  showDialog(`${dialogHeading('GRANDPARENT’S TURN', 'Share a little story.')}<div class="pet-question-quote"><span class="eyebrow">CHARLIE ASKED</span><p>${esc(question)}</p></div><form id="pet-reply-form" data-week="${esc(week.weekStart)}"><div class="form-field"><label for="pet-reply-text">Your story <span class="muted">(optional if you record)</span></label><textarea id="pet-reply-text" name="replyText" maxlength="1600" rows="5" placeholder="A short memory, a favourite game, or a kind thought…">${esc(petReplyDraft)}</textarea><span class="field-help">A nickname or first name only, please. This stays on this device.</span></div>${voiceControls}<p class="form-error" id="pet-reply-error" role="alert"></p><div class="form-actions"><button class="button primary" type="submit" ${recording ? 'disabled' : ''}>Save</button></div></form>`, { className: 'pet-reply-modal', initialFocus: '#pet-reply-text' });
 }
 
 function showPetStoryDialog() {
   const week = getPetWeek(state);
   if (!week?.repliedAt) { notify('Charlie’s family story is not ready yet.'); return; }
   const question = PET_QUESTIONS.find(item => item.id === week.questionId)?.question || 'A question for the family';
-  showDialog(`${dialogHeading('A STORY TO KEEP', 'Charlie heard a family story.')}<div class="pet-question-quote"><span class="eyebrow">THE QUESTION</span><p>${esc(question)}</p></div>${week.replyText ? `<blockquote class="saved-family-story">${esc(week.replyText)}</blockquote>` : '<p class="muted">A voice story was saved on this device.</p>'}${week.voiceNoteId ? `<div class="voice-note-box"><button type="button" class="button secondary" data-action="voice-play" data-id="${esc(week.voiceNoteId)}">Load voice story</button><audio id="pet-audio-player" controls hidden aria-label="Saved family voice story"></audio></div>` : ''}<div class="form-actions">${button('Edit story', 'pet-reply', 'secondary')}${button('Lovely story', 'close-dialog', 'primary')}</div>`);
+  showDialog(`${dialogHeading('A STORY TO KEEP', 'Charlie heard a family story.')}<div class="pet-question-quote"><span class="eyebrow">THE QUESTION</span><p>${esc(question)}</p></div>${week.replyText ? `<blockquote class="saved-family-story">${esc(week.replyText)}</blockquote>` : '<p class="muted">A voice story was saved on this device.</p>'}${week.voiceNoteId ? `<div class="voice-note-box"><button type="button" class="button secondary" data-action="voice-play" data-id="${esc(week.voiceNoteId)}">Load audio</button><audio id="pet-audio-player" controls hidden aria-label="Saved family voice story"></audio></div>` : ''}<div class="form-actions">${button('Edit', 'pet-reply', 'secondary')}${button('Done', 'close-dialog', 'primary')}</div>`);
 }
 
 function releaseVoiceObjectUrl() {
@@ -355,10 +446,35 @@ function printStorybook() {
   globalThis.print?.();
 }
 
+const charlieReactionTimers = new WeakMap();
+function animateCharlie(reaction) {
+  const actor = dialogRoot.querySelector('.evolution-after .charlie-mascot')
+    || dialogRoot.querySelector('.charlie-celebration-art .charlie-mascot')
+    || app.querySelector('.pet-home-art .charlie-art')
+    || app.querySelector('.activity-welcome .charlie-mascot')
+    || app.querySelector('.charlie-art, .charlie-mascot');
+  if (!actor) return;
+  globalThis.clearTimeout(charlieReactionTimers.get(actor));
+  actor.classList.remove('charlie-reacting-feed', 'charlie-reacting-grow');
+  // Flush the SVG layout so replaying the same reaction starts a fresh animation.
+  actor.getBoundingClientRect?.();
+  const className = `charlie-reacting-${reaction}`;
+  actor.classList.add(className);
+  charlieReactionTimers.set(actor, globalThis.setTimeout(() => {
+    actor.classList.remove(className);
+    charlieReactionTimers.delete(actor);
+  }, 3800));
+}
+
 function celebratePetStory(previousExperience, firstReply) {
   const pet = getPetStats(state);
+  if (hasEvolved(previousExperience, pet)) {
+    showPetEvolution(previousExperience, pet, { reward: '+15 growth points', eyebrow: 'A FAMILY STORY SAVED' });
+    return;
+  }
   const newDecoration = PET_DECORATIONS.find(item => previousExperience < item.unlockXp && pet.experience >= item.unlockXp);
-  showDialog(`<div class="pet-celebration" role="status" aria-live="polite"><div class="celebration-emojis" aria-hidden="true"><span>🌟</span><span>🐾</span><span>💛</span></div><p class="eyebrow">A FAMILY STORY SAVED</p><div class="charlie-celebration-art">${renderCharlieMascot()}</div><h2 id="dialog-title">Charlie learned something lovely.</h2><p class="pet-growth-celebration">${firstReply ? '+15 growth points' : 'Your story has been updated.'} Charlie is level ${pet.level}.${newDecoration ? ` New room decoration: ${esc(newDecoration.name)} ${esc(newDecoration.icon)}` : ''}</p>${button('Read the story', 'pet-read-story', 'secondary')}${button('Back to Charlie', 'close-dialog', 'primary')}</div>`, { className: 'pet-celebration-modal', initialFocus: '.pet-celebration .button.primary' });
+  showDialog(`<div class="pet-celebration" role="status" aria-live="polite"><div class="celebration-emojis" aria-hidden="true"><span>🌟</span><span>🐾</span><span>💛</span></div><p class="eyebrow">A FAMILY STORY SAVED</p><div class="charlie-celebration-art">${renderCharlieMascot()}</div><h2 id="dialog-title">Charlie learned something lovely.</h2><p class="pet-growth-celebration">${firstReply ? '+15 growth points' : 'Your story has been updated.'} Charlie is level ${pet.level}.${newDecoration ? ` New room decoration: ${esc(newDecoration.name)} ${esc(newDecoration.icon)}` : ''}</p>${button('Open', 'pet-read-story', 'secondary')}${button('Home', 'close-dialog', 'primary')}</div>`, { className: 'pet-celebration-modal', initialFocus: '.pet-celebration .button.primary' });
+  animateCharlie('grow');
 }
 
 function sessionId() {
@@ -366,7 +482,7 @@ function sessionId() {
 }
 function shuffledPromptOrder(activity) {
   const order = activity.prompts.map((_, index) => index);
-  if (activity.kind !== 'quiz') {
+  if (activity.kind !== 'quiz' && !activity.ordered) {
     for (let index = order.length - 1; index > 0; index--) {
       const other = Math.floor(Math.random() * (index + 1));
       [order[index], order[other]] = [order[other], order[index]];
@@ -384,15 +500,15 @@ function showTogetherSetup(activityId, requestedKind = '') {
   const pinned = activityId === getDailyTheme(state).id ? ACTIVITIES.find(activity => activity.id === activityId) : null;
   const selectedKind = pinned?.kind || requestedKind || preferences.lastPair?.kind;
   const fixedKind = pinned?.kind || (GAME_KINDS.includes(requestedKind) ? requestedKind : null);
-  const modes = [['quiz', 'Quiz'], ['conversation', 'Guided Talk'], ['random', 'Random Talk'], ['choice', 'Would You Rather'], ['collaborative', 'Story Game'], ['reflection', 'Then & Now'], ['walk', 'Walk with Charlie']];
+  const modes = [['sticks', 'Pick Up Sticks'], ['quiz', 'Quiz'], ['conversation', 'Guided Talk'], ['random', 'Random Talk'], ['choice', 'Would You Rather'], ['collaborative', 'Story Game'], ['reflection', 'Then & Now'], ['walk', 'Walk with Charlie']];
   const fixedMode = modes.find(([kind]) => kind === fixedKind);
   const names = preferences.lastPair?.names || ['Alex', 'Gran'];
-  const quickStart = !fixedKind && preferences.lastPair ? `<div class="saved-pair"><div><span class="saved-pair-icon" aria-hidden="true">👥</span><div><h3>Play together again</h3><p>${preferences.lastPair.names.map(esc).join(' &amp; ')} · saved on this device</p></div></div>${button(`Quick start · ${preferences.lastPair.names.map(esc).join(' &amp; ')}`, 'quick-pair-play', 'primary', `data-kind="${esc(preferences.lastPair.kind)}"`)}<p>Edit either name in the fields below.</p>${button('Forget saved names', 'forget-pair', 'ghost small', `data-kind="${esc(selectedKind || preferences.lastPair.kind)}"`)}</div>` : '';
+  const quickStart = !fixedKind && preferences.lastPair ? `<div class="saved-pair"><div><span class="saved-pair-icon" aria-hidden="true">👥</span><div><h3>Play together again</h3><p>${preferences.lastPair.names.map(esc).join(' &amp; ')} · saved on this device</p></div></div>${button('Resume', 'quick-pair-play', 'primary', `data-kind="${esc(preferences.lastPair.kind)}"`)}<p>Edit either name in the fields below.</p>${button('Clear names', 'forget-pair', 'ghost small', `data-kind="${esc(selectedKind || preferences.lastPair.kind)}"`)}</div>` : '';
   const gameChoice = fixedKind
     ? `<div class="selected-game-preview card"><span class="icon-tile" aria-hidden="true">${pinned ? esc(pinned.icon) : gameStyleIllustration(fixedKind)}</span><div><p class="eyebrow">${pinned ? 'TODAY’S GAME' : 'GAME STYLE'}</p><h3>${esc(pinned?.title || fixedMode?.[1] || 'Shared game')}</h3><p class="muted">${pinned ? `${esc(pinned.duration)} · ${esc(pinned.description)}` : 'We’ll choose an unplayed activity at random.'}</p></div></div>`
     : `<fieldset class="game-style-field"><legend>Game style</legend><div class="game-style-grid">${modes.map(([kind, label]) => `<label class="game-style-card"><input class="game-style-radio" type="radio" name="kind" value="${kind}" required ${kind === selectedKind ? 'checked' : ''}><span class="game-style-picture">${gameStyleIllustration(kind)}</span><span class="game-style-name">${label}</span></label>`).join('')}</div></fieldset>`;
   const heading = pinned ? dialogHeading('TODAY’S GAME', 'Who’s playing?') : fixedKind ? dialogHeading('PLAY TOGETHER', 'Who’s playing?') : dialogHeading('PLAY TOGETHER', 'Choose a game.');
-  showDialog(`${heading}${quickStart}<form id="together-setup-form" data-pinned="${pinned ? esc(pinned.id) : ''}" data-kind="${esc(fixedKind || '')}">${gameChoice}<div class="together-player-fields">${[0, 1].map(index => `<div class="form-field"><label for="together-name-${index}">Player ${index + 1}</label><input id="together-name-${index}" name="name${index}" maxlength="40" required autocomplete="off" value="${esc(names[index])}" placeholder="${index ? 'Gran' : 'Alex'}"></div>`).join('')}</div><p class="form-error" id="together-setup-error" role="alert"></p><div class="form-actions">${button('Cancel', 'close-dialog', 'ghost')}<button class="button primary" type="submit">${fixedKind ? 'Show instructions' : 'Next'} ${icon('arrow')}</button></div></form>`, { initialFocus: fixedKind ? '#together-name-0' : '.game-style-radio' });
+  showDialog(`${heading}${quickStart}<form id="together-setup-form" data-pinned="${pinned ? esc(pinned.id) : ''}" data-kind="${esc(fixedKind || '')}">${gameChoice}<div class="together-player-fields">${[0, 1].map(index => `<div class="form-field"><label for="together-name-${index}">Player ${index + 1}</label><input id="together-name-${index}" name="name${index}" maxlength="40" required autocomplete="off" value="${esc(names[index])}" placeholder="${index ? 'Gran' : 'Alex'}"></div>`).join('')}</div><p class="form-error" id="together-setup-error" role="alert"></p><div class="form-actions">${button('Cancel', 'close-dialog', 'ghost')}<button class="button primary" type="submit">Next ${icon('arrow')}</button></div></form>`, { initialFocus: fixedKind ? '#together-name-0' : '.game-style-radio' });
 }
 function randomActivityForKind(kind) {
   const options = ACTIVITIES.filter(activity => activity.kind === kind);
@@ -405,13 +521,14 @@ function randomActivityForKind(kind) {
 function beginTogetherActivity(kind, names) {
   const activity = randomActivityForKind(kind);
   const dailyThemeDate = activity.id === getDailyTheme(state).id ? getDateKey() : null;
-  session = { ...createTogetherSession({ id: sessionId(), activityId: activity.id, names, startedAt: null, dailyThemeDate }), started: false };
+  session = { ...createTogetherSession({ id: sessionId(), activityId: activity.id, names, learning: activeLearning(), startedAt: null, dailyThemeDate }), started: false };
   session.promptOrder = shuffledPromptOrder(session.activity);
   const lastPair = { names: session.participants.map(participant => participant.name), kind };
   savePreferences({ lastPair });
   showTogetherInstructions();
 }
 function togetherScene(activity) {
+  if (activity.kind === 'sticks') return `<svg class="together-scene sticks-howto-art" viewBox="0 0 600 300" role="img" aria-label="The blue stick lies above the red and yellow sticks. Lift the blue stick first." xmlns="http://www.w3.org/2000/svg"><rect x="2" y="2" width="596" height="296" rx="24" fill="#f2e4cb"/><path d="m170 65 230 175" stroke="#fff9ec" stroke-width="20" stroke-linecap="round"/><path d="m170 65 230 175" stroke="#b77a05" stroke-width="12" stroke-linecap="round"/><path d="m170 245 215-180" stroke="#fff9ec" stroke-width="20" stroke-linecap="round"/><path d="m170 245 215-180" stroke="#b94d4b" stroke-width="12" stroke-linecap="round"/><path d="M110 155h345" stroke="#fff9ec" stroke-width="22" stroke-linecap="round"/><path d="M110 155h345" stroke="#3475b4" stroke-width="13" stroke-linecap="round"/><circle cx="110" cy="155" r="19" fill="#3475b4"/><text x="110" y="162" text-anchor="middle" fill="white" font-size="22" font-weight="700">3</text><path d="M470 95v42m-9-12 9 12 9-12" stroke="#305e47" stroke-width="4" fill="none" stroke-linecap="round"/><text x="470" y="70" text-anchor="middle" fill="#204a36" font-size="22" font-weight="700">Lift blue first</text><text x="300" y="278" text-anchor="middle" fill="#283c33" font-size="20">Look for a stick with nothing on top.</text></svg>`;
   return `<svg class="together-scene" viewBox="0 0 600 230" role="img" aria-label="A grandparent and child sharing ${esc(activity.title)} on one device" xmlns="http://www.w3.org/2000/svg">
     <defs><marker id="handoff-arrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 9 4.5 0 9Z" fill="#78936d"/></marker></defs>
     <rect x="1" y="1" width="598" height="228" rx="24" fill="#f0f2e4"/>
@@ -423,6 +540,7 @@ function togetherScene(activity) {
 }
 function gameStyleIllustration(kind) {
   const drawings = {
+    sticks: '<path d="m19 15 58 40" stroke="#b94d4b" stroke-width="6" stroke-linecap="round"/><path d="m26 59 39-48" stroke="#3475b4" stroke-width="6" stroke-linecap="round"/><path d="m13 39 69-13" stroke="#b77a05" stroke-width="6" stroke-linecap="round"/><path d="m38 9 16 50" stroke="#383c43" stroke-width="6" stroke-linecap="round"/>',
     quiz: '<rect x="14" y="8" width="68" height="52" rx="10" fill="#fffdf5"/><circle cx="48" cy="25" r="10" fill="#e5af68"/><text x="48" y="30" text-anchor="middle" font-size="16" font-weight="700" fill="#fff">?</text><path d="M27 43h42M27 51h29" stroke="#91a484" stroke-width="4" stroke-linecap="round"/>',
     conversation: '<path d="M12 13a12 12 0 0 1 12-12h25a12 12 0 0 1 12 12v11a12 12 0 0 1-12 12H30L19 45v-9a12 12 0 0 1-7-12Z" fill="#fffdf5"/><path d="M43 35a11 11 0 0 1 11-11h20a11 11 0 0 1 11 11v8a11 11 0 0 1-7 10v8l-10-8h-14a11 11 0 0 1-11-11Z" fill="#f2d6b8"/><circle cx="30" cy="19" r="2.5" fill="#668269"/><circle cx="39" cy="19" r="2.5" fill="#668269"/><circle cx="48" cy="19" r="2.5" fill="#668269"/><circle cx="61" cy="38" r="2.5" fill="#a36f51"/><circle cx="69" cy="38" r="2.5" fill="#a36f51"/>',
     random: '<rect x="23" y="12" width="48" height="48" rx="9" fill="#e2ead8" transform="rotate(-12 47 36)"/><rect x="28" y="9" width="46" height="50" rx="9" fill="#fffdf5" transform="rotate(8 51 34)"/><path d="m51 17 4 9 10 1-7 7 2 10-9-5-9 5 2-10-7-7 10-1Z" fill="#e5ad62"/>',
@@ -435,7 +553,9 @@ function gameStyleIllustration(kind) {
 }
 function showTogetherInstructions() {
   const a = session.activity;
-  const steps = a.kind === 'quiz'
+  const steps = a.kind === 'sticks'
+    ? [['👀', 'Look', 'Find a stick with nothing crossing above it.'], ['🥢', 'Lift', 'Tap its number, then lift. A clear stick earns points; pick again or pass.'], ['♥', 'Steady', 'A blocked stick costs 1 shared HP and passes the turn. At 0 HP, take a breather.'], ['🏆', 'Clear', 'Collect every stick. The highest stick score wins; both help Charlie grow.']]
+    : a.kind === 'quiz'
     ? [['❓', 'Read', 'Read the question together.'], ['1️⃣', 'Player 1', 'Choose an answer.'], ['📱', 'Pass', 'Keep it hidden. Pass the device.'], ['2️⃣', 'Player 2', 'Choose, then reveal together.']]
     : a.kind === 'conversation'
       ? [['💬', 'Read', 'Read the prompt aloud.'], ['🗣️', 'Player 1', 'Share while the other listens.'], ['📱', 'Pass', 'Tap “Pass the turn.”'], ['🗣️', 'Player 2', 'Share, then tap “Next prompt.”']]
@@ -449,7 +569,43 @@ function showTogetherInstructions() {
               ? [['👟', 'Choose', 'Pick a safe nearby path with an adult, or imagine one.'], ['👀', 'Notice', 'Look up and share what you see or hear.'], ['🌳', 'Pause', 'Rest in the shade and trade a story.'], ['📍', 'No tracking', 'GrandPals does not use GPS or save your location.']]
               : [['🕰️', 'Then', 'Think about how it used to be.'], ['☀️', 'Now', 'Share what life is like today.'], ['💬', 'Compare', 'Talk about what changed.'], ['♡', 'Your choice', 'Skip anything too personal.']];
   const stepsMarkup = steps.map(([picture, title, detail], index) => `<div class="rule-step"><div class="rule-picture" aria-hidden="true">${picture}</div><h3>${index + 1}. ${title}</h3><p>${detail}</p></div>${index < steps.length - 1 ? '<span class="rule-arrow" aria-hidden="true">➜</span>' : ''}`).join('');
-  showDialog(`${dialogHeading('HOW TO PLAY', `Ready for ${esc(a.title)}?`)}<div class="session-intro"><h3>${esc(a.description)}</h3></div><div class="charlie-guide">${renderCharlieMascot()}<p><strong>Charlie is your family’s virtual pet.</strong><br>Every finished game helps him grow.</p></div><div class="illustrated-rules">${togetherScene(a)}<div class="rule-flow" aria-label="How to play, step by step">${stepsMarkup}</div></div><p class="muted rules-footer">${esc(a.duration)} · ${a.kind === 'quiz' ? `${a.questions.length} questions` : `${a.prompts.length} prompts`} · +30 points when you finish together</p><div class="form-actions">${button('Cancel', 'close-dialog', 'ghost')}<button class="button primary" data-action="session-start" type="button">Start ${icon('arrow')}</button></div>`);
+  showDialog(`${dialogHeading('HOW TO PLAY', `Ready for ${esc(a.title)}?`)}<div class="session-intro"><h3>${esc(a.description)}</h3></div><div class="charlie-guide">${renderCharlieMascot()}<p><strong>Charlie is your family’s virtual pet.</strong><br>Every finished game helps him grow.</p></div><div class="illustrated-rules">${togetherScene(a)}<div class="rule-flow" aria-label="How to play, step by step">${stepsMarkup}</div></div><p class="muted rules-footer">${a.kind === 'sticks' ? 'Digital table game: choose a top stick and lift it. ' : ''}${esc(a.duration)} · ${a.kind === 'sticks' ? `${session.sticks.count} sticks` : a.kind === 'quiz' ? `${a.questions.length} questions` : `${a.prompts.length} prompts`} · +30 points when you finish together</p><div class="form-actions">${button('Cancel', 'close-dialog', 'ghost')}<button class="button primary" data-action="session-start" type="button">Start ${icon('arrow')}</button></div>`, { wide: a.kind === 'sticks', className: a.kind === 'sticks' ? 'sticks-instructions-modal' : '' });
+}
+function renderSticksSession() {
+  const game = getStickGameStats(session.sticks);
+  const together = session.mode === 'in-person';
+  const names = together ? session.participants.map(item => item.name) : [state.profile.name];
+  const selected = game.remaining.find(stick => stick.id === session.selectedStick);
+  const hint = session.stickHint;
+  const svg = `<svg class="sticks-table" viewBox="0 0 400 340" role="group" aria-label="Pick Up Sticks table. Choose a numbered stick to lift."><rect x="6" y="6" width="388" height="328" rx="24" fill="#f2e4cb" stroke="#d5bd98" stroke-width="3"/><path d="M30 84h340M30 170h340M30 256h340" stroke="#e5d3b5" stroke-width="2"/>${game.remaining.map(stick => `<g class="stick-on-table ${selected?.id === stick.id ? 'stick-selected' : ''} ${hint === stick.id ? 'stick-hinted' : ''}" role="button" tabindex="${game.hp ? 0 : -1}" aria-label="Stick ${stick.id + 1}, ${stick.name}, ${stick.points} points" aria-pressed="${selected?.id === stick.id}" aria-disabled="${game.hp === 0}" data-action="stick-select" data-index="${stick.id}" style="--stick-color:${stick.color}"><path class="stick-hit" d="M${stick.x1} ${stick.y1}L${stick.x2} ${stick.y2}"/><path class="stick-edge" d="M${stick.x1} ${stick.y1}L${stick.x2} ${stick.y2}"/><path class="stick-wood" d="M${stick.x1} ${stick.y1}L${stick.x2} ${stick.y2}"/><circle class="stick-label" cx="${stick.x1}" cy="${stick.y1}" r="13" fill="${stick.color}" stroke="#fff9ec" stroke-width="2"/><text x="${stick.x1}" y="${stick.y1 + 5}" text-anchor="middle" fill="white" font-size="14" font-weight="800">${stick.id + 1}</text></g>`).join('')}</svg>`;
+  const previousModal = dialogRoot.querySelector('.sticks-modal');
+  const scrollTop = previousModal?.scrollTop ?? 0;
+  const numberPickerOpen = previousModal?.querySelector('.sticks-number-picker')?.open ?? false;
+  const previousViewport = previousModal?.querySelector('.sticks-board-viewport');
+  const boardScroll = { left: previousViewport?.scrollLeft ?? 0, top: previousViewport?.scrollTop ?? 0 };
+  showDialog(`${dialogHeading('CHOOSE A TOP STICK, THEN LIFT', 'Pick Up Sticks')}<div class="sticks-scoreboard">${names.map((name, index) => `<div class="stick-player ${together && game.turn === index ? 'active' : ''}"><strong>${esc(name)}</strong><span>${together ? game.scores[index] : game.scores[0] + game.scores[1]} stick points</span></div>`).join('')}<span class="sticks-hp" role="status">HP ${game.hp} / 3 <span aria-hidden="true">${'♥'.repeat(game.hp)}${'♡'.repeat(3 - game.hp)}</span></span><span class="sticks-remaining">${game.remaining.length} / ${session.sticks.count} left</span></div>
+    <div class="sticks-action-bar"><p class="stick-selection" role="status">${game.hp === 0 ? 'Take a breather. Your progress is safe.' : selected ? `${selected.name} stick ${selected.id + 1} · ${selected.points} points` : 'Tap a stick with nothing crossing above it.'}</p><div class="sticks-action-buttons">${game.hp === 0 ? button('Recover', 'restore-hp', 'primary') : button('Lift', 'stick-pick', 'primary', `${!selected ? 'disabled ' : ''}aria-label="${selected ? `Lift stick ${selected.id + 1}` : 'Choose a stick to lift'}"`)}${button(session.stickZoom ? 'Fit' : 'Zoom', 'stick-zoom', 'secondary')}${together ? button('Pass', 'stick-pass', 'secondary', game.hp === 0 ? 'disabled' : '') : ''}${(session.learning?.challenge ?? 1) === 1 ? button('Hint', 'stick-hint', 'secondary', game.hp === 0 ? 'disabled' : '') : ''}</div></div>
+    <p class="turn-label" id="sticks-status" role="status" tabindex="-1">${together ? `${esc(names[game.turn])}’s turn. ` : ''}${Number.isInteger(hint) ? `Charlie spotted stick ${hint + 1}. Nothing crosses above it.` : esc(game.message)}</p>
+    <div class="sticks-layout"><div class="sticks-board-viewport ${session.stickZoom ? 'is-zoomed' : ''}" tabindex="0" role="region" aria-label="Stick board. Scroll to explore when zoomed.">${svg}</div><div class="sticks-legend">${STICK_COLOURS.map(color => `<span><i style="background:${color.color}" aria-hidden="true"></i>${color.name} ${color.points}</span>`).join('')}</div><details class="sticks-number-picker" ${numberPickerOpen ? 'open' : ''}><summary>Choose by number</summary><div class="stick-number-grid" aria-label="Sticks on the table">${game.remaining.map(stick => `<button type="button" class="stick-number ${selected?.id === stick.id ? 'selected' : ''}" style="--stick-color:${stick.color}" data-action="stick-select" data-index="${stick.id}" aria-label="Stick ${stick.id + 1}, ${stick.name}, ${stick.points} points" aria-pressed="${selected?.id === stick.id}" ${game.hp === 0 ? 'disabled' : ''}>${stick.id + 1}</button>`).join('')}</div></details></div>`, { wide: true, className: 'sticks-modal', initialFocus: game.hp === 0 ? '[data-action="restore-hp"]' : selected ? '[data-action="stick-pick"]' : '#sticks-status' });
+  if (previousModal) {
+    dialogRoot.querySelector('.sticks-modal').scrollTop = scrollTop;
+    const viewport = dialogRoot.querySelector('.sticks-board-viewport');
+    viewport.scrollLeft = boardScroll.left;
+    viewport.scrollTop = boardScroll.top;
+  }
+}
+function playStickMove(move) {
+  if (!session?.started || session.finished || session.activity.kind !== 'sticks') return;
+  session.sticks = pickStick(session.sticks, move);
+  const game = getStickGameStats(session.sticks);
+  session.turn = game.turn;
+  session.selectedStick = null;
+  session.stickHint = null;
+  if (game.finished) {
+    session.finished = true;
+    if (session.mode === 'in-person') completeTogetherMission();
+    else showReview();
+  } else renderSession();
 }
 function renderTogetherSession() {
   const a = session.activity;
@@ -457,16 +613,16 @@ function renderTogetherSession() {
   const total = quiz ? a.questions.length : promptCount(session);
   const q = quiz ? a.questions[session.step] : null;
   const currentName = session.participants[session.turn].name;
-  const activityTip = a.kind === 'walk' ? 'Take a short, safe walk with an adult or imagine one together. Look up, notice your surroundings, and leave location tracking off.' : a.kind === 'collaborative' ? 'Add one sentence or idea, then pass the turn so your partner can continue the story.' : a.kind === 'choice' ? 'Choose a side, then explain your reasons. There are no wrong choices.' : a.kind === 'random' ? 'A surprise prompt is up. Follow the conversation wherever it leads.' : a.kind === 'reflection' ? 'Compare what was different then with what feels familiar today.' : 'Tell your story while the other person listens. Tap “I’m done” when you’re ready to pass the turn.';
+  const activityTip = a.kind === 'walk' ? 'Take a short, safe walk with an adult or imagine one together. Look up, notice your surroundings, and leave location tracking off.' : a.kind === 'collaborative' ? 'Add one sentence or idea, then pass the turn so your partner can continue the story.' : a.kind === 'choice' ? 'Choose a side, then explain your reasons. There are no wrong choices.' : a.kind === 'random' ? 'A surprise prompt is up. Follow the conversation wherever it leads.' : a.kind === 'reflection' ? 'Compare what was different then with what feels familiar today.' : 'Tell your story while the other person listens, then pass the turn.';
   const answerWasSkipped = quiz && session.revealed && session.answers.every(answers => answers[session.step] === null);
-  const readButton = speechAvailable() ? `${button('🔊 Read aloud', 'speak-prompt', 'secondary small')}${button('Stop reading', 'stop-reading', 'ghost small')}` : '';
-  const answersMarkup = quiz ? `<div class="quiz-options">${q.answers.map((answer, index) => `<button type="button" class="quiz-option ${session.revealed && index === q.correct ? 'correct' : ''}" data-action="together-answer" data-index="${index}" ${session.revealed ? 'disabled' : ''}><span class="answer-letter">${String.fromCharCode(65 + index)}</span>${esc(answer)}${session.revealed && index === q.correct ? icon('check') : ''}</button>`).join('')}</div>${session.revealed ? `<div class="answer-feedback" role="status"><strong>${answerWasSkipped ? `Skipped together. The answer is ${esc(q.answers[q.correct])}.` : `Correct answer: ${esc(q.answers[q.correct])}`}</strong><p>${esc(q.explanation)}</p><div class="together-scores">${session.participants.map((participant, index) => { const answer = session.answers[index][session.step]; return `<p class="player-result"><strong>${esc(participant.name)}</strong>: ${answer === null ? 'Skipped' : `${esc(q.answers[answer])} · ${answer === q.correct ? 'Correct!' : 'A little something learned.'}`}</p>`; }).join('')}</div></div>` : `<p class="field-help">${session.turn === 1 ? 'Player 1’s answer is hidden until you choose. Pass the device and make your own pick.' : 'Choose your answer, then pass the device to player 2. Answers are revealed after both choices.'}</p>`}` : `<div class="conversation-tip"><span aria-hidden="true">✦</span><p>${activityTip}</p></div>`;
-  showDialog(`${dialogHeading('FACE TO FACE · ON THIS DEVICE', esc(a.title))}<div class="participant-badges">${session.participants.map((participant, index) => `<div class="participant-badge ${!session.revealed && session.turn === index ? 'active' : ''}"><span class="mini-avatar" aria-hidden="true">${esc(initials(participant.name))}</span><span class="participant-name">Player ${index + 1} · ${esc(participant.name)}</span></div>`).join('')}</div><div class="activity-panel"><div class="session-audio-controls">${readButton}</div><div class="question-count"><span>${quiz ? 'QUESTION' : a.kind === 'random' ? 'SURPRISE PROMPT' : a.kind === 'choice' ? 'CHOOSE & SHARE' : a.kind === 'collaborative' ? 'STORY BEAT' : a.kind === 'reflection' ? 'THEN & NOW' : a.kind === 'walk' ? 'WALKING CHAT' : 'CONVERSATION STARTER'} ${session.step + 1} OF ${total}</span><span>${esc(a.icon)}</span></div><div class="progress-track" role="progressbar" aria-label="Shared activity progress" aria-valuemin="0" aria-valuemax="${total * 2}" aria-valuenow="${session.step * 2 + (session.revealed ? 2 : session.turn)}"><div class="progress-fill" style="width:${(session.step * 2 + (session.revealed ? 2 : session.turn)) / (total * 2) * 100}%"></div></div><p class="turn-label" role="status">${session.revealed ? answerWasSkipped ? 'Skipped together. Keep going when you are ready.' : 'Both answers are in. Let’s see!' : `${esc(currentName)}, it’s your turn.`}</p><h3 class="prompt-text" tabindex="-1">${esc(quiz ? q.question : promptFor(session, session.step))}</h3>${answersMarkup}<div class="session-footer">${!session.revealed ? button(quiz ? 'Skip this question' : 'Skip this prompt', 'together-skip', 'secondary') : ''}${button(quiz ? session.step === total - 1 ? 'Finish & earn points' : 'Next question' : session.turn === 0 ? 'Pass the turn' : session.step === total - 1 ? 'Finish & earn points' : 'Next prompt', 'together-next', 'primary', quiz && !session.revealed ? 'disabled' : '')}</div></div>`, { wide: true, initialFocus: '.prompt-text' });
+  const readButton = speechAvailable() ? `${button('🔊 Read aloud', 'speak-prompt', 'secondary small')}${button('Stop', 'stop-reading', 'ghost small')}` : '';
+  const answersMarkup = quiz ? `<div class="quiz-options">${q.answers.map((answer, index) => `<button type="button" class="quiz-option ${session.revealed && index === q.correct ? 'correct' : ''}" data-action="together-answer" data-index="${index}" ${session.revealed || session.hp === 0 ? 'disabled' : ''}><span class="answer-letter">${String.fromCharCode(65 + index)}</span>${esc(answer)}${session.revealed && index === q.correct ? icon('check') : ''}</button>`).join('')}</div>${session.revealed ? `<div class="answer-feedback" role="status"><strong>${answerWasSkipped ? `Skipped together. The answer is ${esc(q.answers[q.correct])}.` : `Correct answer: ${esc(q.answers[q.correct])}`}</strong><p>${esc(q.explanation)}</p><div class="together-scores">${session.participants.map((participant, index) => { const answer = session.answers[index][session.step]; return `<p class="player-result"><strong>${esc(participant.name)}</strong>: ${answer === null ? 'Skipped' : `${esc(q.answers[answer])} · ${answer === q.correct ? 'Correct!' : 'A little something learned.'}`}</p>`; }).join('')}</div></div>` : `<p class="field-help">${session.turn === 1 ? 'Player 1’s answer is hidden until you choose. Pass the device and make your own pick.' : 'Choose your answer, then pass the device to player 2. Answers are revealed after both choices.'}</p>`}` : `<div class="conversation-tip"><span aria-hidden="true">✦</span><p>${activityTip}</p></div>`;
+  showDialog(`${dialogHeading('FACE TO FACE · ON THIS DEVICE', esc(a.title))}<div class="participant-badges">${session.participants.map((participant, index) => `<div class="participant-badge ${!session.revealed && session.turn === index ? 'active' : ''}"><span class="mini-avatar" aria-hidden="true">${esc(initials(participant.name))}</span><span class="participant-name">Player ${index + 1} · ${esc(participant.name)}</span></div>`).join('')}</div><div class="activity-panel">${quiz ? renderHP() : ''}<div class="session-audio-controls">${readButton}</div><div class="question-count"><span>${quiz ? 'QUESTION' : a.kind === 'random' ? 'SURPRISE PROMPT' : a.kind === 'choice' ? 'CHOOSE & SHARE' : a.kind === 'collaborative' ? 'STORY BEAT' : a.kind === 'reflection' ? 'THEN & NOW' : a.kind === 'walk' ? 'WALKING CHAT' : 'CONVERSATION STARTER'} ${session.step + 1} OF ${total}</span><span>${esc(a.icon)}</span></div><div class="progress-track" role="progressbar" aria-label="Shared activity progress" aria-valuemin="0" aria-valuemax="${total * 2}" aria-valuenow="${session.step * 2 + (session.revealed ? 2 : session.turn)}"><div class="progress-fill" style="width:${(session.step * 2 + (session.revealed ? 2 : session.turn)) / (total * 2) * 100}%"></div></div><p class="turn-label" role="status">${session.revealed ? answerWasSkipped ? 'Skipped together. Keep going when you are ready.' : 'Both answers are in. Let’s see!' : `${esc(currentName)}, it’s your turn.`}</p><h3 class="prompt-text" tabindex="-1">${esc(quiz ? q.question : promptFor(session, session.step))}</h3>${answersMarkup}<div class="session-footer">${!session.revealed ? button('Skip', 'together-skip', 'secondary') : ''}${button(quiz ? session.step === total - 1 ? 'Finish' : 'Next' : session.turn === 0 ? 'Pass' : session.step === total - 1 ? 'Finish' : 'Next', 'together-next', 'primary', quiz && (!session.revealed || session.hp === 0) ? 'disabled' : '')}</div></div>`, { wide: true, initialFocus: '.prompt-text' });
   if (preferences.autoRead) speak(speechTextForSession());
 }
 function renderTogetherHistory(review) {
   const a = ACTIVITIES.find(item => item.id === review.activityId);
-  return `<article class="card together-history"><div class="section-heading"><div><span class="eyebrow">MISSION COMPLETE</span><h3>${esc(a?.title || 'Shared activity')}</h3><p class="muted">${review.participants.map(participant => esc(participant.name)).join(' &amp; ')} · completed together</p></div><span class="points-earned">+30 shared points</span></div><div class="together-scores">${review.participants.map((participant, index) => `<div class="player-result"><h4>${esc(participant.name)}</h4>${participant.rating === null ? '<p class="muted">Played together</p>' : `<p>${'★'.repeat(participant.rating)}${'☆'.repeat(5 - participant.rating)} · ${participant.rating}/5</p>`}${participant.score === null ? '' : `<p>${participant.score} / ${a?.questions.length || 0} correct</p>`}${participant.note ? `<p>${esc(participant.note)}</p>` : ''}</div>`).join('')}</div></article>`;
+  return `<article class="card together-history"><div class="section-heading"><div><span class="eyebrow">MISSION COMPLETE</span><h3>${esc(a?.title || 'Shared activity')}</h3><p class="muted">${review.participants.map(participant => esc(participant.name)).join(' &amp; ')} · completed together</p></div><span class="points-earned">+30 shared points</span></div><div class="together-scores">${review.participants.map((participant, index) => `<div class="player-result"><h4>${esc(participant.name)}</h4>${participant.rating === null ? '<p class="muted">Played together</p>' : `<p>${'★'.repeat(participant.rating)}${'☆'.repeat(5 - participant.rating)} · ${participant.rating}/5</p>`}${participant.score === null ? '' : `<p>${participant.score} / ${review.questionCount || a?.questions.length || 0} correct</p>`}${review.stickScores ? `<p>${review.stickScores[index]} stick points</p>` : ''}${participant.note ? `<p>${esc(participant.note)}</p>` : ''}</div>`).join('')}</div></article>`;
 }
 function completeTogetherMission() {
   if (!session?.finished || session.mode !== 'in-person') return;
@@ -475,34 +631,44 @@ function completeTogetherMission() {
   const finishedDailyTheme = completed.dailyThemeDate === getDateKey();
   const activity = completed.activity;
   const names = completed.participants.map(participant => participant.name);
-  const scoreLine = activity.kind === 'quiz'
-    ? `<p class="celebration-score">${completed.participants.map((participant, index) => { const answers = completed.answers[index]; const correct = answers.filter((value, question) => value === activity.questions[question].correct).length; const skipped = answers.filter(value => value === null).length; return `${esc(participant.name)}: ${correct}/${activity.questions.length} correct${skipped ? ` · ${skipped} skipped` : ''}`; }).join(' · ')}</p>`
-    : '';
+  const stickResult = activity.kind === 'sticks' ? getStickGameStats(completed.sticks) : null;
+  const scoreLine = stickResult
+    ? `<div class="completion-scores">${names.map((name, index) => `<div><strong>${esc(name)}</strong><span>${stickResult.scores[index]} <small>stick points</small></span></div>`).join('')}</div><p class="completion-winner">${stickResult.scores[0] === stickResult.scores[1] ? 'It’s a tie!' : `${esc(names[stickResult.scores[0] > stickResult.scores[1] ? 0 : 1])} wins!`}</p>`
+    : activity.kind === 'quiz'
+      ? `<div class="completion-scores">${completed.participants.map((participant, index) => `<div><strong>${esc(participant.name)}</strong><span>${completed.answers[index].filter((value, question) => value === activity.questions[question].correct).length}/${activity.questions.length} <small>correct</small></span></div>`).join('')}</div>`
+      : `<p class="celebration-names">${names.map(esc).join(' &amp; ')}</p>`;
   const petBefore = getPetStats(state);
   const previousPetLevel = petBefore.level;
   const previousPetExperience = petBefore.experience;
   commit(completeTogetherSession(state, completed));
   const petGrowth = getPetStats(state);
+  const evolved = hasEvolved(previousPetExperience, petGrowth);
   const newDecoration = PET_DECORATIONS.find(item => previousPetExperience < item.unlockXp && petGrowth.experience >= item.unlockXp);
   const streak = getJourneyStats(state).currentStreak;
   session = null;
   render();
-  showDialog(`<div class="celebration" role="status" aria-live="polite"><div class="celebration-confetti" aria-hidden="true"><span>✨</span><span>🎉</span><span>🌟</span><span>🎊</span><span>🌼</span><span>🎉</span><span>✨</span></div><p class="eyebrow">MISSION COMPLETE</p><h2 id="dialog-title">You did it together!</h2><div class="celebration-emojis" aria-hidden="true"><span>🎉</span><span>🏆</span><span>🌟</span></div><div class="points-reward"><span>+30</span><strong>POINTS EARNED!</strong></div><p class="celebration-names">${names.map(esc).join(' &amp; ')}</p>${scoreLine}<div class="charlie-celebration-art">${renderCharlieMascot()}</div><p class="pet-growth-celebration">Charlie gained 10 growth points and reached level ${petGrowth.level}${petGrowth.level > previousPetLevel ? '!' : '.'}${newDecoration ? ` New room decoration unlocked: ${esc(newDecoration.name)} ${esc(newDecoration.icon)}` : ''}</p><p class="celebration-message">${finishedDailyTheme ? `Daily theme complete! Congratulations${streak ? ` — your shared streak is ${streak} ${streak === 1 ? 'day' : 'days'}` : ''}.` : 'Every story, answer, and laugh counts. Charlie grew from your game, too!'}</p>${button('Play again with this pair', 'quick-pair-play', 'secondary')}${button('Hooray! Keep going', 'close-dialog', 'primary celebration-dismiss')}</div>`, { className: 'celebration-modal', initialFocus: '.celebration-dismiss' });
+  showDialog(`<div class="celebration compact-completion" role="status" aria-live="polite"><p class="eyebrow">MISSION COMPLETE</p><h2 id="dialog-title">${evolved ? 'Charlie evolved!' : 'Nice teamwork!'}</h2>${evolved ? renderEvolution(previousPetExperience, petGrowth) : `<div class="charlie-celebration-art">${renderCharlieMascot()}</div>`}<div class="completion-rewards"><strong>+30 points</strong><span class="pet-growth-celebration">Charlie +10 growth</span></div>${scoreLine}${petGrowth.level > previousPetLevel ? `<p class="completion-unlock">Level ${petGrowth.level}!</p>` : ''}${newDecoration ? `<p class="completion-unlock">${esc(newDecoration.icon)} New decoration</p>` : ''}${CHALLENGES.filter(item => previousPetLevel < item.unlockLevel && petGrowth.level >= item.unlockLevel).map(item => `<p class="completion-unlock">${item.name} unlocked</p>`).join('')}${finishedDailyTheme ? `<p class="completion-theme">Daily theme complete${streak > 1 ? ` · ${streak}-day streak` : ''}</p>` : ''}<div class="completion-actions">${button('Replay', 'quick-pair-play', 'primary')}${button('Done', 'close-dialog', 'secondary celebration-dismiss')}</div></div>`, { className: `celebration-modal compact-completion-modal ${evolved ? 'evolution-modal' : ''}`, initialFocus: '.celebration-dismiss' });
+  animateCharlie('grow');
 }
 
 function startActivity(activityId, personId = null) {
   if (!state.profile) { showProfile(); notify('Create your profile first, then choose an activity.'); return; }
   if (personId && (isFamily() || !getMatches(state).some(p => p.id === personId))) { notify('This connection is unavailable for your profile. Try an activity at home.'); return; }
-  const activity = ACTIVITIES.find(a => a.id === activityId);
+  const learning = activeLearning();
+  const activity = getLearningActivity(activityId, learning);
   if (!activity) return;
   session = { id: globalThis.crypto?.randomUUID?.() || `session-${Date.now()}-${Math.random().toString(36).slice(2)}`, activity, personId, step: 0, answers: [], revealed: false, started: false, finished: false, promptOrder: shuffledPromptOrder(activity), dailyThemeDate: activity.id === getDailyTheme(state).id ? getDateKey() : null };
+  session.learning = learning;
+  session.hp = 3;
+  if (activity.kind === 'sticks') session.sticks = createStickGame({ count: CHALLENGES[learning.challenge - 1].sticks });
   showSessionIntro();
 }
 function showSessionIntro() {
   const partner = person(session.personId);
-  showDialog(`${dialogHeading('A MOMENT TOGETHER', partner ? `Say hello to ${esc(partner.name)}.` : 'Make a little space to connect.')}<div class="session-intro"><span class="icon-tile">${esc(session.activity.icon)}</span><h3>${esc(session.activity.title)}</h3><p class="muted">${esc(session.activity.description)}</p></div>${partner ? `<div class="notice">${esc(partner.name)} is a fictional profile. This connection is simulated: there is no live participant, audio, video, or messaging.</div>` : ''}<p class="muted">${esc(session.activity.duration)} · ${session.activity.kind === 'quiz' ? 'Answer every question' : 'Explore every prompt'}${session.mode === 'in-person' ? '. Finish together to earn 30 points.' : ', then leave a review to earn 30 points.'}</p><div class="form-actions">${button('Maybe later', 'close-dialog', 'ghost')}${button('Start activity', 'session-start', 'primary')}</div>`);
+  showDialog(`${dialogHeading('A MOMENT TOGETHER', partner ? `Say hello to ${esc(partner.name)}.` : 'Make a little space to connect.')}<div class="session-intro"><span class="icon-tile">${esc(session.activity.icon)}</span><h3>${esc(session.activity.title)}</h3><p class="muted">${esc(session.activity.description)}</p></div>${session.activity.kind === 'sticks' ? togetherScene(session.activity) : ''}${session.activity.kind === 'sticks' ? '<div class="notice">Choose a numbered stick, then lift it. Nothing may cross above it. A blocked pick costs 1 HP; at 0 HP, take a breather to restore all 3. Clear the pile to finish. This digital version tests observation; it does not simulate hand movement.</div>' : ''}${partner ? `<div class="notice">${esc(partner.name)} is a fictional profile. This connection is simulated: there is no live participant, audio, video, or messaging.</div>` : ''}<p class="muted">${esc(session.activity.duration)} · ${session.activity.kind === 'sticks' ? `${session.sticks.count} sticks · Clear the pile` : session.activity.kind === 'quiz' ? 'Answer every question' : 'Explore every prompt'}${session.mode === 'in-person' ? '. Finish together to earn 30 points.' : ', then leave a review to earn 30 points.'}</p><div class="form-actions">${button('Cancel', 'close-dialog', 'ghost')}${button('Start', 'session-start', 'primary')}</div>`);
 }
 function renderSession() {
+  if (session.activity.kind === 'sticks') { renderSticksSession(); return; }
   if (session.mode === 'in-person') { renderTogetherSession(); return; }
   const a = session.activity;
   const quiz = a.kind === 'quiz';
@@ -511,12 +677,12 @@ function renderSession() {
   const partner = person(session.personId);
   const selected = session.answers[session.step];
   const soloTip = a.kind === 'walk' ? 'Take a short, safe walk with an adult or imagine one from home. Notice something nearby. GrandPals does not use GPS.' : a.kind === 'collaborative' ? 'Take turns adding one idea each. You can share this device and build the story together.' : a.kind === 'choice' ? 'Pick the option you like best, then share why. There are no wrong choices.' : a.kind === 'random' ? 'Try the surprise prompt and follow your curiosity.' : a.kind === 'reflection' ? 'Think about what has changed and what has stayed the same.' : 'Take turns. Ask “why?” or “what happened next?” There’s no right answer, just a story to share.';
-  const readControls = speechAvailable() ? `<div class="session-audio-controls">${button('🔊 Read aloud', 'speak-prompt', 'secondary small')}${button('Stop reading', 'stop-reading', 'ghost small')}</div>` : '';
+  const readControls = speechAvailable() ? `<div class="session-audio-controls">${button('🔊 Read aloud', 'speak-prompt', 'secondary small')}${button('Stop', 'stop-reading', 'ghost small')}</div>` : '';
   const questionBody = quiz
-    ? `<div class="quiz-options">${q.answers.map((answer, index) => `<button type="button" class="quiz-option ${session.revealed && index === q.correct ? 'correct' : ''} ${session.revealed && selected === index && index !== q.correct ? 'incorrect' : ''} ${selected === index ? 'selected' : ''}" data-action="quiz-answer" data-index="${index}" ${session.revealed ? 'disabled' : ''}><span class="answer-letter">${String.fromCharCode(65 + index)}</span>${esc(answer)}${session.revealed && index === q.correct ? icon('check') : ''}</button>`).join('')}</div>${session.revealed ? `<div class="answer-feedback" role="status"><strong>${selected === q.correct ? 'You got it!' : 'A little something new to learn.'}</strong><p>${esc(q.explanation)}</p></div>` : '<p class="field-help">Choose an answer. A little curiosity is all you need.</p>'}`
+    ? `<div class="quiz-options">${q.answers.map((answer, index) => `<button type="button" class="quiz-option ${session.revealed && index === q.correct ? 'correct' : ''} ${session.revealed && selected === index && index !== q.correct ? 'incorrect' : ''} ${selected === index ? 'selected' : ''}" data-action="quiz-answer" data-index="${index}" ${session.revealed || session.hp === 0 ? 'disabled' : ''}><span class="answer-letter">${String.fromCharCode(65 + index)}</span>${esc(answer)}${session.revealed && index === q.correct ? icon('check') : ''}</button>`).join('')}</div>${session.revealed ? `<div class="answer-feedback" role="status"><strong>${selected === q.correct ? 'You got it!' : 'A little something new to learn.'}</strong><p>${esc(q.explanation)}</p></div>` : '<p class="field-help">Choose an answer. A little curiosity is all you need.</p>'}`
     : `<div class="conversation-tip"><span aria-hidden="true">✦</span><p>${soloTip}</p></div>`;
   const canSkip = !quiz || !session.revealed;
-  showDialog(`${dialogHeading(partner ? 'SIMULATED CONNECTION · NO LIVE CALL' : 'A SHARED ACTIVITY · ON THIS DEVICE', esc(a.title))}<div class="session-layout"><aside class="call-stage"><div class="stage-avatar">${partner ? esc(partner.initials) : esc(initials(state.profile.name))}</div><h3>${partner ? esc(partner.name) : 'Your moment together'}</h3><p class="stage-caption">${partner ? 'Fictional demo companion' : isFamily() ? 'Share this device with family' : 'Play solo or with someone beside you'}</p><span class="demo-badge">${partner ? 'Simulated connection' : 'At your own pace'}</span><p class="field-help">Camera and microphone are not used.</p></aside><div class="activity-panel">${readControls}<div class="question-count"><span>${quiz ? 'QUESTION' : a.kind === 'random' ? 'SURPRISE PROMPT' : a.kind === 'choice' ? 'CHOOSE & SHARE' : a.kind === 'collaborative' ? 'STORY BEAT' : a.kind === 'reflection' ? 'THEN & NOW' : a.kind === 'walk' ? 'WALKING CHAT' : 'CONVERSATION STARTER'} ${session.step + 1} OF ${total}</span><span>${esc(a.icon)}</span></div><div class="progress-track" role="progressbar" aria-label="Activity progress" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${session.step}"><div class="progress-fill" style="width:${session.step / total * 100}%"></div></div><h3 class="prompt-text">${esc(quiz ? q.question : promptFor(session, session.step))}</h3>${questionBody}<div class="session-footer"><span class="field-help">${quiz ? 'Learning something new counts, too.' : 'Take as long as you like.'}</span>${canSkip ? button(quiz ? 'Skip this question' : 'Skip this prompt', 'session-skip', 'secondary') : ''}${button(session.step === total - 1 ? 'Finish & reflect' : quiz ? 'Next question' : 'Next prompt', 'session-next', 'primary', quiz && !session.revealed ? 'disabled' : '')}</div></div></div>`, { wide: true, initialFocus: '.prompt-text' });
+  showDialog(`${dialogHeading(partner ? 'SIMULATED CONNECTION · NO LIVE CALL' : 'A SHARED ACTIVITY · ON THIS DEVICE', esc(a.title))}<div class="session-layout"><aside class="call-stage"><div class="stage-avatar">${partner ? esc(partner.initials) : esc(initials(state.profile.name))}</div><h3>${partner ? esc(partner.name) : 'Your moment together'}</h3><p class="stage-caption">${partner ? 'Fictional demo companion' : isFamily() ? 'Share this device with family' : 'Play solo or with someone beside you'}</p><span class="demo-badge">${partner ? 'Simulated connection' : 'At your own pace'}</span><p class="field-help">Camera and microphone are not used.</p></aside><div class="activity-panel">${quiz ? renderHP() : ''}${readControls}<div class="question-count"><span>${quiz ? 'QUESTION' : a.kind === 'random' ? 'SURPRISE PROMPT' : a.kind === 'choice' ? 'CHOOSE & SHARE' : a.kind === 'collaborative' ? 'STORY BEAT' : a.kind === 'reflection' ? 'THEN & NOW' : a.kind === 'walk' ? 'WALKING CHAT' : 'CONVERSATION STARTER'} ${session.step + 1} OF ${total}</span><span>${esc(a.icon)}</span></div><div class="progress-track" role="progressbar" aria-label="Activity progress" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${session.step}"><div class="progress-fill" style="width:${session.step / total * 100}%"></div></div><h3 class="prompt-text">${esc(quiz ? q.question : promptFor(session, session.step))}</h3>${questionBody}<div class="session-footer"><span class="field-help">${quiz ? 'Learning something new counts, too.' : 'Take as long as you like.'}</span>${canSkip ? button('Skip', 'session-skip', 'secondary') : ''}${button(session.step === total - 1 ? 'Finish' : 'Next', 'session-next', 'primary', quiz && (!session.revealed || session.hp === 0) ? 'disabled' : '')}</div></div></div>`, { wide: true, initialFocus: '.prompt-text' });
   dialogRoot.querySelector('.prompt-text').setAttribute('tabindex', '-1');
   dialogRoot.querySelector('.prompt-text').focus();
   if (preferences.autoRead) speak(speechTextForSession());
@@ -525,11 +691,11 @@ function showReview() {
   const a = session.activity;
   const partner = person(session.personId);
   const score = a.kind === 'quiz' ? session.answers.filter((value, index) => value === a.questions[index].correct).length : null;
-  showDialog(`${dialogHeading('A LITTLE REFLECTION GOES A LONG WAY', 'How was your moment?')}<div class="completion-banner"><span aria-hidden="true">✦</span><div><h3>You made time for connection.</h3><p>${a.kind === 'quiz' ? `${score} of ${a.questions.length} correct. ` : 'All conversation prompts explored. '}Save your review to collect 30 points.</p></div></div><form id="review-form"><fieldset class="form-field"><legend>How much did you enjoy this activity?</legend><div class="review-stars">${[1, 2, 3, 4, 5].map(value => `<label class="rating-choice"><input type="radio" name="rating" value="${value}" required ${value === 5 ? 'checked' : ''}><span aria-hidden="true">★</span><span>${value}</span><span class="sr-only">out of 5 stars</span></label>`).join('')}</div></fieldset><div class="form-field"><label for="review-note">Anything you’d like to remember? <span class="muted">(optional)</span></label><textarea id="review-note" name="note" maxlength="500" rows="3" placeholder="A favorite question, a shared story, a small surprise…"></textarea><span class="field-help">This reflection is saved only on this device.</span></div>${partner && !isFamily() ? `<label class="consent-field"><input type="checkbox" name="addFriend" ${state.friends.includes(partner.id) ? 'checked disabled' : 'checked'}><span>${state.friends.includes(partner.id) ? `${esc(partner.name)} is already in your circle` : `Add ${esc(partner.name)} to my circle`}<small>Save this fictional profile for another demo activity.</small></span></label>` : ''}<p class="form-error" id="review-error" role="alert"></p><div class="form-actions"><span class="field-help">Your ratings help shape your group picks.</span><button class="button primary" type="submit">Save review & earn 30 points ${icon('star')}</button></div></form>`);
+  showDialog(`${dialogHeading('A LITTLE REFLECTION GOES A LONG WAY', 'How was your moment?')}<div class="completion-banner"><span aria-hidden="true">✦</span><div><h3>You made time for connection.</h3><p>${a.kind === 'sticks' ? `${session.sticks.count} sticks cleared · ${getStickGameStats(session.sticks).scores.reduce((sum, value) => sum + value, 0)} stick points. ` : a.kind === 'quiz' ? `${score} of ${a.questions.length} correct. ` : 'All conversation prompts explored. '}Save your review to collect 30 points.</p></div></div><form id="review-form"><fieldset class="form-field"><legend>How much did you enjoy this activity?</legend><div class="review-stars">${[1, 2, 3, 4, 5].map(value => `<label class="rating-choice"><input type="radio" name="rating" value="${value}" required ${value === 5 ? 'checked' : ''}><span aria-hidden="true">★</span><span>${value}</span><span class="sr-only">out of 5 stars</span></label>`).join('')}</div></fieldset><div class="form-field"><label for="review-note">Anything you’d like to remember? <span class="muted">(optional)</span></label><textarea id="review-note" name="note" maxlength="500" rows="3" placeholder="A favorite question, a shared story, a small surprise…"></textarea><span class="field-help">This reflection is saved only on this device.</span></div>${partner && !isFamily() ? `<label class="consent-field"><input type="checkbox" name="addFriend" ${state.friends.includes(partner.id) ? 'checked disabled' : 'checked'}><span>${state.friends.includes(partner.id) ? `${esc(partner.name)} is already in your circle` : `Add ${esc(partner.name)} to my circle`}<small>Save this fictional profile for another demo activity.</small></span></label>` : ''}<p class="form-error" id="review-error" role="alert"></p><div class="form-actions"><span class="field-help">Your ratings help shape your group picks.</span><button class="button primary" type="submit">Save ${icon('star')}</button></div></form>`);
 }
 function showQuit() {
   const pointsMessage = session.mode === 'in-person' ? 'Finish the activity together to save it and earn 30 shared points.' : 'This activity is not saved yet. Finish it and save a review to earn points.';
-  showDialog(`${dialogHeading('TAKE YOUR TIME', 'Leave this activity?')}<p class="muted">${pointsMessage}</p><div class="form-actions">${button('Keep going', 'session-resume', 'primary')}${button('Leave activity', 'session-quit', 'ghost danger')}</div>`);
+  showDialog(`${dialogHeading('TAKE YOUR TIME', 'Leave this activity?')}<p class="muted">${pointsMessage}</p><div class="form-actions">${button('Resume', 'session-resume', 'primary')}${button('Leave', 'session-quit', 'ghost danger')}</div>`);
 }
 function handleClose() {
   if (speechAvailable()) globalThis.speechSynthesis.cancel();
@@ -539,7 +705,7 @@ function handleClose() {
 }
 
 function navigate(next) {
-  if (!['discover', 'activities', 'characters', 'circle', 'rewards', 'storybook'].includes(next)) return;
+  if (!['discover', 'activities', 'characters', 'circle', 'rewards', 'settings', 'storybook'].includes(next)) return;
   page = next;
   if (location.hash !== `#${next}`) history.replaceState(null, '', `#${next}`);
   render();
@@ -550,7 +716,7 @@ async function action(target) {
   const name = target.dataset.action;
   const id = target.dataset.id;
   if (name === 'navigate') navigate(target.dataset.page);
-  else if (['discover', 'activities', 'characters', 'circle', 'rewards'].includes(name)) navigate(name);
+  else if (['discover', 'activities', 'characters', 'circle', 'rewards', 'settings'].includes(name)) navigate(name);
   else if (name === 'profile') showProfile();
   else if (name === 'display-settings') showDisplaySettings();
   else if (name === 'text-size') { savePreferences({ textSize: target.dataset.size }); showDisplaySettings(); }
@@ -558,10 +724,20 @@ async function action(target) {
   else if (name === 'speak-prompt') speak(speechTextForSession());
   else if (name === 'stop-reading') { if (speechAvailable()) globalThis.speechSynthesis.cancel(); }
   else if (name === 'close-dialog') handleClose();
+  else if (name === 'evolution-replay') {
+    const index = PET_EVOLUTIONS.findIndex(form => form.id === id);
+    const pet = getPetStats(state);
+    if (index < 1 || pet.experience < PET_EVOLUTIONS[index].unlockXp) { notify('Grow with Charlie to unlock this look.'); return; }
+    const form = PET_EVOLUTIONS[index];
+    showPetEvolution(PET_EVOLUTIONS[index - 1].unlockXp, { ...pet, experience: form.unlockXp, form, stage: form.name }, { replay: true });
+  }
   else if (name === 'pet-feed') {
     const before = getPetStats(state).experience;
     commit(feedPet(state));
     render();
+    const pet = getPetStats(state);
+    if (hasEvolved(before, pet)) { showPetEvolution(before, pet, { reward: '+3 growth' }); return; }
+    if (pet.experience > before) animateCharlie('feed');
     notify(getPetStats(state).experience > before ? 'Charlie enjoyed a little snack and grew 3 points.' : 'Charlie has already had a snack today.');
   }
   else if (name === 'pet-ask') {
@@ -589,19 +765,54 @@ async function action(target) {
   else if (name === 'start-random-activity') startActivity(randomActivityForKind(target.dataset.kind).id);
   else if (name === 'trusted-preview') showTrustedPreview();
   else if (name === 'community-preview') { navigate('discover'); closeDialog(); await action({ dataset: { action: 'scroll-matches' } }); }
-  else if (name === 'together-answer') { session = answerTogetherQuestion(session, Number(target.dataset.index)); renderSession(); }
-  else if (name === 'together-skip') { session = skipTogetherStep(session); if (session.finished) completeTogetherMission(); else renderSession(); }
-  else if (name === 'together-next') { session = advanceTogetherSession(session); if (session.finished) completeTogetherMission(); else renderSession(); }
-  else if (name === 'session-start') { session.started = true; session.startedAt = Date.now(); renderSession(); }
-  else if (name === 'quiz-answer') { if (!session || session.mode === 'in-person' || session.revealed) return; session.answers[session.step] = Number(target.dataset.index); session.revealed = true; renderSession(); }
+  else if (name === 'stick-zoom') {
+    if (!session?.started || session.activity.kind !== 'sticks') return;
+    session.stickZoom = !session.stickZoom;
+    renderSession();
+  }
+  else if (name === 'stick-select') {
+    if (!session?.started || session.activity.kind !== 'sticks' || getStickGameStats(session.sticks).hp === 0) return;
+    session.selectedStick = Number(target.dataset.index);
+    renderSession();
+  }
+  else if (name === 'stick-pick') { if (Number.isInteger(session?.selectedStick)) playStickMove(session.selectedStick); }
+  else if (name === 'stick-pass') playStickMove('pass');
+  else if (name === 'stick-hint') {
+    if (!session?.started || session.activity.kind !== 'sticks' || (session.learning?.challenge ?? 1) !== 1) return;
+    session.stickHint = getStickGameStats(session.sticks).available[0];
+    renderSession();
+  }
+  else if (name === 'restore-hp') {
+    if (!session?.started || session.finished) return;
+    if (session.activity.kind === 'sticks') playStickMove('rest');
+    else if (session.hp === 0) { session.hp = 3; renderSession(); }
+  }
+  else if (name === 'together-answer') {
+    if (session?.hp === 0) return;
+    session = answerTogetherQuestion(session, Number(target.dataset.index));
+    if (session.revealed) session.hp = Math.max(0, (session.hp ?? 3) - session.answers.filter(answers => answers[session.step] !== session.activity.questions[session.step].correct).length);
+    renderSession();
+  }
+  else if (name === 'together-skip') { if (session?.hp === 0) return; session = skipTogetherStep(session); if (session.finished) completeTogetherMission(); else renderSession(); }
+  else if (name === 'together-next') { if (session?.hp === 0) return; session = advanceTogetherSession(session); if (session.finished) completeTogetherMission(); else renderSession(); }
+  else if (name === 'session-start') { if (!session || session.started) return; session.started = true; session.hp = 3; session.startedAt = Date.now(); renderSession(); }
+  else if (name === 'quiz-answer') {
+    if (!session?.started || session.activity.kind !== 'quiz' || session.mode === 'in-person' || session.revealed || session.hp === 0) return;
+    const answer = Number(target.dataset.index);
+    if (!Number.isInteger(answer) || !session.activity.questions[session.step].answers[answer]) return;
+    session.answers[session.step] = answer;
+    if (answer !== session.activity.questions[session.step].correct) session.hp = Math.max(0, session.hp - 1);
+    session.revealed = true;
+    renderSession();
+  }
   else if (name === 'session-next') {
-    if (!session || session.mode === 'in-person' || (session.activity.kind === 'quiz' && !session.revealed)) return;
+    if (!session || session.mode === 'in-person' || session.activity.kind === 'sticks' || session.hp === 0 || (session.activity.kind === 'quiz' && !session.revealed)) return;
     const total = session.activity.kind === 'quiz' ? session.activity.questions.length : promptCount(session);
     if (session.step + 1 === total) { session.finished = true; showReview(); }
     else { session.step++; session.revealed = false; renderSession(); }
   }
   else if (name === 'session-skip') {
-    if (!session || session.mode === 'in-person') return;
+    if (!session || session.mode === 'in-person' || session.activity.kind === 'sticks' || session.hp === 0) return;
     const total = session.activity.kind === 'quiz' ? session.activity.questions.length : promptCount(session);
     if (session.activity.kind === 'quiz') session.answers[session.step] = null;
     if (session.step + 1 === total) { session.finished = true; showReview(); }
@@ -616,16 +827,33 @@ async function action(target) {
   else if (name === 'redeem') {
     const reward = REWARDS.find(r => r.id === id);
     if (!reward) return;
-    showDialog(`${dialogHeading('A LITTLE THANK YOU', 'Redeem a sample reward?')}<div class="session-intro"><span class="icon-tile">${esc(reward.icon)}</span><h3>${esc(reward.name)}</h3><p>${reward.cost} kindness points</p></div><p class="notice">This creates a demo voucher with no monetary value. It cannot be used at a real business.</p><div class="form-actions">${button('Keep my points', 'close-dialog', 'ghost')}${button('Redeem sample voucher', 'redeem-confirm', 'primary', `data-id="${esc(id)}"`)}</div>`);
+    showDialog(`${dialogHeading('A LITTLE THANK YOU', 'Redeem a sample reward?')}<div class="session-intro"><span class="icon-tile">${esc(reward.icon)}</span><h3>${esc(reward.name)}</h3><p>${reward.cost} kindness points</p></div><p class="notice">This creates a demo voucher with no monetary value. It cannot be used at a real business.</p><div class="form-actions">${button('Cancel', 'close-dialog', 'ghost')}${button('Redeem', 'redeem-confirm', 'primary', `data-id="${esc(id)}"`)}</div>`);
+    pendingRewardId = reward.id;
   }
-  else if (name === 'redeem-confirm') { commit(redeemReward(state, id)); render(); closeDialog(); notify('Your sample voucher is ready. Find it below your rewards.'); }
-  else if (name === 'reset-confirm') showDialog(`${dialogHeading('START FRESH', 'Reset your demo?')}<p class="muted">This removes profiles, points, game history, Charlie’s growth, weekly stories, saved voice notes, player names, connections, group choices, and sample vouchers from this browser.</p><div class="form-actions">${button('Keep my data', 'profile', 'secondary')}${button('Reset all demo data', 'reset', 'danger primary')}</div>`);
+  else if (name === 'redeem-confirm') {
+    if (!pendingRewardId || pendingRewardId !== id) return;
+    const next = redeemReward(state, id);
+    pendingRewardId = null;
+    commit(next);
+    render();
+    showRewardCelebration(REWARDS.find(reward => reward.id === id), state.redemptions.at(-1));
+  }
+  else if (name === 'reward-view') {
+    const voucher = state.redemptions.find(item => item.id === id);
+    if (!voucher) return;
+    closeDialog();
+    navigate('rewards');
+    const target = document.querySelector(`[data-voucher-id="${voucher.id}"]`);
+    target?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'center' });
+    target?.querySelector('.voucher-code')?.focus({ preventScroll: true });
+  }
+  else if (name === 'reset-confirm') showDialog(`${dialogHeading('START FRESH', 'Reset your demo?')}<p class="muted">This removes profiles, points, game history, Charlie’s growth, weekly stories, saved voice notes, player names, connections, group choices, and sample vouchers from this browser.</p><div class="form-actions">${button('Cancel', 'profile', 'secondary')}${button('Reset', 'reset', 'danger primary')}</div>`);
   else if (name === 'reset') {
     let removed = false;
     try { localStorage.removeItem(STORAGE_KEY); removed = true; } catch { /* Storage may be blocked. */ }
     let audioRemoved = true;
     try { if (globalThis.indexedDB) await clearVoiceNotes(); } catch { audioRemoved = false; }
-    commit(createState()); savePreferences({ lastPair: null }); session = null; navigate('discover'); closeDialog();
+    commit(createState()); savePreferences({ lastPair: null, learning: null }); session = null; navigate('discover'); closeDialog();
     notify(!audioRemoved ? 'Your game and story data were reset, but saved audio could not be removed. Clear this site’s browser data to delete it.' : removed || storageAvailable ? 'Your demo has been reset. A fresh start awaits.' : 'This visit has been reset, but saved browser data could not be removed and may return on reload. Clear this site’s data in your browser settings to remove it.');
   }
 }
@@ -642,6 +870,17 @@ document.addEventListener('input', event => {
   if (event.target.matches('#pet-reply-text')) petReplyDraft = event.target.value;
 });
 document.addEventListener('submit', async event => {
+  if (event.target.id === 'learning-form') {
+    event.preventDefault();
+    if (page !== 'settings') return;
+    const form = new FormData(event.target);
+    try {
+      const learning = getLearningSettings(state, Number(form.get('ageBand')), Number(form.get('challenge')));
+      savePreferences({ learning });
+      render();
+      notify('Settings saved. Your next games will use these choices.');
+    } catch (error) { document.querySelector('#learning-error').textContent = error.message; notify(error.message); }
+  }
   if (event.target.id === 'together-setup-form') {
     event.preventDefault();
     const form = new FormData(event.target);
@@ -651,7 +890,8 @@ document.addEventListener('submit', async event => {
       if (!GAME_KINDS.includes(kind)) throw new Error('Please choose a game style.');
       const activity = requested || randomActivityForKind(kind);
       const dailyThemeDate = activity.id === getDailyTheme(state).id ? getDateKey() : null;
-      session = { ...createTogetherSession({ id: sessionId(), activityId: activity.id, names: [form.get('name0'), form.get('name1')], startedAt: null, dailyThemeDate }), started: false };
+      const learning = activeLearning();
+      session = { ...createTogetherSession({ id: sessionId(), activityId: activity.id, names: [form.get('name0'), form.get('name1')], learning, startedAt: null, dailyThemeDate }), started: false };
       session.promptOrder = shuffledPromptOrder(session.activity);
       savePreferences({ lastPair: { names: session.participants.map(participant => participant.name), kind } });
       showTogetherInstructions();
@@ -696,15 +936,24 @@ document.addEventListener('submit', async event => {
     try {
       const completedAt = Date.now();
       const previousPetLevel = getPetStats(state).level;
-      commit(completeSession(state, { id: session.id, personId: session.personId, activityId: session.activity.id, rating: Number(form.get('rating')), note: String(form.get('note') || '').trim(), addFriend: form.get('addFriend') === 'on', completedAt, durationMs: session.startedAt ? Math.min(43200000, Math.max(0, completedAt - session.startedAt)) : 0, dailyThemeDate: session.dailyThemeDate }));
+      const previousPetExperience = getPetStats(state).experience;
+      commit(completeSession(state, { id: session.id, personId: session.personId, activityId: session.activity.id, learning: session.learning, sticks: session.sticks, rating: Number(form.get('rating')), note: String(form.get('note') || '').trim(), addFriend: form.get('addFriend') === 'on', completedAt, durationMs: session.startedAt ? Math.min(43200000, Math.max(0, completedAt - session.startedAt)) : 0, dailyThemeDate: session.dailyThemeDate }));
       const finishedDailyTheme = session.dailyThemeDate === getDateKey();
       const streak = getJourneyStats(state).currentStreak;
       const pet = getPetStats(state);
-      session = null; render(); closeDialog(); notify(`${finishedDailyTheme ? `Daily theme complete! Congratulations${streak ? ` — a ${streak}-day streak` : ''}. ` : ''}Charlie gained 10 growth points and is now level ${pet.level}${pet.level > previousPetLevel ? '!' : '.'} You earned 30 points.`);
+      session = null; render(); closeDialog();
+      if (hasEvolved(previousPetExperience, pet)) showPetEvolution(previousPetExperience, pet, { reward: '+30 points · +10 growth' });
+      else { notify(`${finishedDailyTheme ? `Daily theme complete! Congratulations${streak ? ` — a ${streak}-day streak` : ''}. ` : ''}Charlie gained 10 growth points and is now level ${pet.level}${pet.level > previousPetLevel ? '!' : '.'} You earned 30 points.`); animateCharlie('grow'); }
     } catch (error) { document.querySelector('#review-error').textContent = error.message; }
   }
 });
 document.addEventListener('keydown', event => {
+  const stick = event.target?.closest?.('.stick-on-table');
+  if (stick && (event.key === 'Enter' || event.key === ' ')) {
+    event.preventDefault();
+    action(stick).catch(error => notify(error.message));
+    return;
+  }
   const modal = dialogRoot.querySelector('.modal');
   if (!modal) return;
   if (event.key === 'Escape') { event.preventDefault(); handleClose(); }
@@ -718,5 +967,5 @@ document.addEventListener('keydown', event => {
 });
 window.addEventListener('hashchange', () => { if (!dialogRoot.firstElementChild) navigate(location.hash.slice(1)); });
 const initialPage = location.hash.slice(1);
-if (['discover', 'activities', 'characters', 'circle', 'rewards', 'storybook'].includes(initialPage)) page = initialPage;
+if (['discover', 'activities', 'characters', 'circle', 'rewards', 'settings', 'storybook'].includes(initialPage)) page = initialPage;
 render();

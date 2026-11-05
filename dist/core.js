@@ -56,7 +56,284 @@ export const PET_DECORATIONS = [
   { id: 'star-mobile', name: 'Starry night mobile', icon: '⭐', unlockXp: 200 },
 ];
 
+export const PET_EVOLUTIONS = [
+  { id: 'new-friend', name: 'New friend', unlockXp: 0 },
+  { id: 'curious-sprout', name: 'Curious sprout', unlockXp: 30 },
+  { id: 'little-explorer', name: 'Little explorer', unlockXp: 80 },
+  { id: 'story-keeper', name: 'Story keeper', unlockXp: 180 },
+];
+
+export function getPetForm(experience) {
+  if (!Number.isSafeInteger(experience) || experience < 0) throw new Error('Invalid growth points.');
+  return PET_EVOLUTIONS.filter(form => experience >= form.unlockXp).at(-1);
+}
+
+// Learning bands are family choices, not developmental assessments.
+export const LEARNING_STAGES = [
+  { age: 6, level: 1, name: 'Little discoverer', ages: 'Ages 6–8', detail: 'Colours, counting, plants, and everyday places.' },
+  { age: 9, level: 2, name: 'Growing explorer', ages: 'Ages 9–11', detail: 'Number patterns, nature, and connections around Singapore.' },
+  { age: 12, level: 3, name: 'Curious thinker', ages: 'Ages 12+ / adults', detail: 'Culture, reasoning, and stories across generations.' },
+];
+export const CHALLENGES = [
+  { id: 1, name: 'First steps', unlockLevel: 1, sticks: 9, detail: '4 quiz questions or talk prompts · 9 sticks · hints' },
+  { id: 2, name: 'New adventures', unlockLevel: 2, sticks: 15, detail: '5 quiz questions or talk prompts · 15 sticks' },
+  { id: 3, name: 'Master explorer', unlockLevel: 4, sticks: 21, detail: 'Full quiz and talk sets · 21 sticks' },
+];
+
+const question = (text, answers, correct, explanation) => ({ question: text, answers, correct, explanation });
+const JUNIOR_QUESTIONS = {
+  'garden-quiz': [
+    question('What does a plant need to drink?', ['Water', 'Sand', 'Juice'], 0, 'Plants need water. Can you help water a plant?'),
+    question('Which part of a plant is usually green?', ['The pot', 'The leaf', 'The stone'], 1, 'Leaves are often green. Look for one nearby.'),
+    question('What can grow into a new plant?', ['A spoon', 'A shoe', 'A seed'], 2, 'A seed can grow when it has the right conditions.'),
+    question('Which animal can help flowers by moving pollen?', ['A bee', 'A cat', 'A fish'], 0, 'Bees visit flowers and can carry pollen between them.'),
+    question('Where do roots usually grow?', ['In the sky', 'In the soil', 'On a plate'], 1, 'Roots usually grow in soil and take in water.'),
+    question('Which part of a plant can be colourful and attract bees?', ['The root', 'The pot', 'The flower'], 2, 'Flowers can attract bees and other pollinators.'),
+  ],
+  'playful-puzzles': [
+    question('You have 2 sticks and find 1 more. How many now?', ['3', '4', '5'], 0, 'Two plus one makes three. Count together.'),
+    question('Which shape has 3 sides?', ['Circle', 'Triangle', 'Square'], 1, 'A triangle has three sides.'),
+    question('What comes next: red, blue, red, blue, ...?', ['Green', 'Yellow', 'Red'], 2, 'Red comes next in this repeating pattern.'),
+    question('You share 1 of your 4 sticks. How many are left?', ['3', '2', '4'], 0, 'Four take away one leaves three.'),
+    question('Which number is the biggest?', ['2', '5', '3'], 1, 'Five is bigger than two or three.'),
+    question('Which object can roll?', ['A book', 'A square tile', 'A ball'], 2, 'A round ball can roll. Can you find another round object?'),
+  ],
+  'singapore-quiz': [
+    question('What colour is the lower half of Singapore’s flag?', ['White', 'Green', 'Blue'], 0, 'The flag has red above white.'),
+    question('Where can a family buy food from different stalls?', ['A swimming pool', 'A hawker centre', 'A library shelf'], 1, 'A hawker centre has many food stalls.'),
+    question('What should you take out when it rains?', ['A sunhat only', 'A toy boat', 'An umbrella'], 2, 'An umbrella helps keep you dry.'),
+    question('Which animal has a trunk?', ['An elephant', 'A butterfly', 'A chicken'], 0, 'An elephant has a long trunk.'),
+    question('What can you ride on MRT tracks?', ['A bicycle', 'A train', 'A boat'], 1, 'MRT trains carry people around Singapore.'),
+    question('Which fruit has a spiky shell?', ['A banana', 'An apple', 'A durian'], 2, 'A durian has a spiky shell. Ask an adult to handle it.'),
+  ],
+};
+const EXPLORER_QUESTIONS = {
+  'garden-quiz': [
+    question('Why do many plants need sunlight?', ['To make food in their leaves', 'To turn into rocks', 'To stop growing'], 0, 'Plants use light to make food. This is called photosynthesis.'),
+    question('Which part usually takes water from soil?', ['Petals', 'Roots', 'Fruit'], 1, 'Roots absorb water and help anchor a plant.'),
+    question('Which material can often be composted?', ['Plastic wrappers', 'Glass bottles', 'Fruit peels'], 2, 'Fruit peels can break down into compost.'),
+    question('Why do bees visit many flowers?', ['To collect nectar and pollen', 'To count the leaves', 'To hide stones'], 0, 'As bees visit, they can move pollen between flowers.'),
+    question('Which leaf gives pandan cake its fragrance?', ['Mint', 'Pandan', 'Lettuce'], 1, 'Pandan leaves give many dishes a distinctive fragrance.'),
+    question('What may happen if soil stays too wet?', ['Roots turn into flowers', 'Plants need no light', 'Roots may rot'], 2, 'Too much water can harm roots. Check before watering.'),
+  ],
+  'playful-puzzles': [
+    question('What comes next: 3, 6, 9, ...?', ['12', '10', '15'], 0, 'The pattern adds three each time.'),
+    question('Two players collect 7 and 5 sticks. How many together?', ['10', '12', '14'], 1, 'Seven plus five is twelve.'),
+    question('A red stick is worth 5 points. What are 3 worth?', ['8', '10', '15'], 2, 'Three groups of five make fifteen.'),
+    question('What is half of 18 sticks?', ['9', '6', '12'], 0, 'Two equal groups of nine make eighteen.'),
+    question('You have 20 points and spend 6. How many remain?', ['12', '14', '16'], 1, 'Twenty minus six is fourteen.'),
+    question('Which shape has exactly 4 equal sides and 4 right angles?', ['Triangle', 'Circle', 'Square'], 2, 'A square has four equal sides and four right angles.'),
+  ],
+  'singapore-quiz': [
+    question('What does the Merlion combine?', ['A lion and a fish', 'A bird and a cat', 'A tree and a flower'], 0, 'The Merlion has a lion’s head and a fish’s body.'),
+    question('How many stars are on Singapore’s flag?', ['Four', 'Five', 'Six'], 1, 'There are five stars on the flag.'),
+    question('Which is a way to save water at home?', ['Leave taps running', 'Ignore leaking taps', 'Turn off the tap while brushing'], 2, 'Turning off the tap avoids wasting water.'),
+    question('Where is Singapore Zoo?', ['Mandai', 'Sentosa', 'Pulau Ubin'], 0, 'Singapore Zoo is in Mandai.'),
+    question('What might you buy at a wet market?', ['Only computers', 'Fresh vegetables and fish', 'Only train tickets'], 1, 'Wet markets sell fresh food and other groceries.'),
+    question('Which transport runs on rails around Singapore?', ['A bumboat', 'A taxi', 'The MRT'], 2, 'The MRT is a railway system.'),
+  ],
+};
+
+const JUNIOR_PROMPTS = {
+  'family-recipes': [
+    'Name a food you like. What colour is it?',
+    'What snack would you share with your partner?',
+    'Point to or name a spoon, bowl, or cup you use at home.',
+    'What fruit would you put in a picnic basket?',
+    'What kitchen job can you do with an adult?',
+    'Draw or describe a meal you would make together.',
+  ],
+  'music-memories': [
+    'Hum a tune you like, or name a song.',
+    'Clap a short pattern for your partner to copy.',
+    'Name an animal and make its sound together.',
+    'Which song makes you want to dance?',
+    'What sound do you hear near home?',
+    'Make up a little song about Charlie.',
+  ],
+  'small-stories': [
+    'Name a game you like to play.',
+    'Tell your partner about a toy you like.',
+    'What made you smile today?',
+    'Where would you take Charlie for a fun day?',
+    'Name someone who helped you recently.',
+    'What would you like your partner to teach you?',
+  ],
+  'creative-colours': [
+    'Choose a colour you like. Find something that colour.',
+    'Point to a round object, or draw a circle.',
+    'Draw or describe a happy face for Charlie.',
+    'What colour would you paint Charlie’s room?',
+    'Make a shape with your hands for your partner to copy.',
+    'Draw or describe a card for someone you love.',
+  ],
+  'garden-walk-talk': [
+    'Name a plant you have seen near home.',
+    'Can you spot or imagine a green leaf?',
+    'What sound might a bird make?',
+    'Would Charlie like to sit under a tree or beside a flower?',
+    'Name something you might see in a park.',
+    'Tell your partner about a place you like to play.',
+  ],
+  'random-talk': [
+    'If Charlie could wear a hat, what colour would it be?',
+    'What animal would you like to meet?',
+    'Name something that makes you laugh.',
+    'What would you put in a pretend treasure box?',
+    'Show your partner a funny face or describe one.',
+    'What kind thing could you do together today?',
+  ],
+  'would-you-rather': [
+    'Would you rather draw a cat or a bird?',
+    'Would you rather splash in puddles or build a sandcastle?',
+    'Would you rather sing a song or listen to a story?',
+    'Would you rather have a red kite or a blue ball?',
+    'Would you rather visit a park or a beach?',
+    'Would you rather teach Charlie to clap or wave?',
+  ],
+  'hawker-choices': [
+    'Would you rather have rice or noodles? Point or say why.',
+    'Would you rather share a banana or an orange?',
+    'Would you rather eat with a spoon or chopsticks?',
+    'Would you rather sit indoors or in the shade outside?',
+    'Would you rather choose a snack or help set the table?',
+    'Would you rather bring a picnic or visit a food stall?',
+  ],
+  'story-stitch': [
+    'Start a story: Charlie finds a tiny red bag. What is inside?',
+    'Charlie takes the bag to a park. Who does he meet?',
+    'The bag belongs to someone. Who could help find its owner?',
+    'A rain cloud appears. Where can the friends stay dry?',
+    'A neighbour offers a clue. What does the neighbour say?',
+    'Tell us how they return the bag and end the story.',
+  ],
+  'neighbourhood-story': [
+    'Start a story about Charlie visiting a playground. Who joins him?',
+    'The friends find a lost toy. What does it look like?',
+    'How can an adult help them find the toy’s owner?',
+    'It starts raining. Where can they safely wait with the toy?',
+    'A neighbour recognises the toy. What do they tell the friends?',
+    'The owner gets the toy back. How does the story end?',
+  ],
+  'then-and-now': [
+    'Name something you liked when you were smaller.',
+    'What is a game you enjoy now?',
+    'Ask your partner what toy they liked as a child.',
+    'What can you do now that you could not do as a baby?',
+    'Show or describe a family photo you remember.',
+    'What would you like to learn next?',
+  ],
+  'charlie-walk': [
+    'With an adult, choose a safe path, or imagine a walk from home.',
+    'Look for or imagine something green. What is it?',
+    'What sound can Charlie hear? Copy or describe it.',
+    'Pause somewhere safe. What did you enjoy about the walk?',
+    'Name something round you might see on your path.',
+    'What would you tell Charlie about walking safely?',
+  ],
+};
+
+const EXPLORER_PROMPTS = {
+  'family-recipes': [
+    'Choose a favourite dish. Which ingredients do you recognise?',
+    'How would you describe its taste to someone who has never tried it?',
+    'Ask your partner who taught them to make or enjoy a favourite meal.',
+    'Plan a meal together. Which safe jobs could each of you do?',
+    'What could you do with leftovers instead of wasting them?',
+    'Invent a new snack using two ingredients you both like.',
+  ],
+  'music-memories': [
+    'Pick a song and explain what mood it creates for you.',
+    'Teach your partner a rhythm and ask them to change one beat.',
+    'Compare a song you enjoy with one your partner enjoyed as a child.',
+    'Choose three sounds for a song about your neighbourhood.',
+    'Which instrument would you learn, and what would you practise first?',
+    'Make a two-song playlist together and explain each choice.',
+  ],
+  'small-stories': [
+    'Describe a time you learned something after making a mistake.',
+    'Ask your partner how they spent an afternoon at your age.',
+    'What is one thing you do differently, and one thing you have in common?',
+    'Plan a small adventure you could enjoy together.',
+    'Tell a story about someone being kind in your neighbourhood.',
+    'Choose a skill you could teach each other and explain the first step.',
+  ],
+  'creative-colours': [
+    'Choose two colours for a picture and explain the mood they create.',
+    'Find or imagine a repeating pattern. How could you extend it?',
+    'Describe a familiar place so your partner could sketch it.',
+    'Design a useful object for Charlie’s room. What problem does it solve?',
+    'Compare something handmade with something made by a machine.',
+    'Plan a card using a shape, a colour, and a message for someone.',
+  ],
+  'garden-walk-talk': [
+    'Describe two things a plant might need in a neighbourhood garden.',
+    'What differences do you notice between a bird and a butterfly?',
+    'Plan a shady walking route and explain why you chose it.',
+    'Ask your partner about a green space they remember from childhood.',
+    'How could you help keep a park pleasant for other visitors?',
+    'Choose a nature question you would like to investigate together.',
+  ],
+  'random-talk': [
+    'If Charlie could invent something helpful, what problem would it solve?',
+    'What new skill could you practise for ten minutes a day?',
+    'Plan a fun afternoon together without buying anything.',
+    'Which everyday object could you use in a completely new way?',
+    'What question would you ask someone who grew up in another time?',
+    'Describe a small act of kindness and explain its effect.',
+  ],
+  'would-you-rather': [
+    'Would you rather invent a board game or write a comic? Explain why.',
+    'Would you rather explore a nature trail or a museum? What would you learn?',
+    'Would you rather learn a family recipe or teach a game? Give a reason.',
+    'Would you rather travel by bicycle or MRT for a day out? Compare them.',
+    'Would you rather be able to talk to birds or understand every song?',
+    'Would you rather improve a playground or create a community garden?',
+  ],
+  'hawker-choices': [
+    'Would you rather introduce a visitor to kaya toast or roti prata? Why?',
+    'Would you rather try a new dish or learn how a favourite is made?',
+    'Would you rather share several small dishes or one large dish? Compare.',
+    'Would you rather choose a stall by its menu or a family recommendation?',
+    'Would you rather help plan the order or help tidy the table? Explain.',
+    'Would you rather invent a dessert or a savoury snack for your family?',
+  ],
+  'story-stitch': [
+    'Start a story about a character with a useful but surprising object.',
+    'Give the character a goal and a reason to visit a new place.',
+    'Add a problem that cannot be solved by the object alone.',
+    'Introduce a helper with a different skill. How do they work together?',
+    'Explain how their plan solves the problem.',
+    'Resolve the problem and end with something the characters learned from each other.',
+  ],
+  'neighbourhood-story': [
+    'Start a story about two neighbours planning a community celebration.',
+    'Choose a familiar meeting place and a job for each neighbour.',
+    'A sudden rain shower changes their plan. What becomes difficult?',
+    'A new neighbour offers a skill that could help. What is it?',
+    'Describe how the neighbours solve the problem together.',
+    'Resolve the problem and end with a new tradition for the neighbourhood.',
+  ],
+  'then-and-now': [
+    'Ask your partner how they kept in touch with friends at your age.',
+    'Compare one of their childhood games with a game you play today.',
+    'What can a newer way of doing something make easier?',
+    'What is worth keeping from an older way of doing it?',
+    'How has a place you both know changed?',
+    'Choose a family tradition to keep and one to start together.',
+  ],
+  'charlie-walk': [
+    'With an adult, plan a safe short walk, or imagine one from home. Explain your route.',
+    'Compare two plants, buildings, or colours you notice or imagine.',
+    'What might explain a neighbourhood sound Charlie hears?',
+    'Pause somewhere safe and ask your partner how this area used to look.',
+    'Suggest one way to make the path more pleasant for others.',
+    'Choose a question to explore on your next walk together.',
+  ],
+};
+
 export const ACTIVITIES = [
+  { id: 'pick-up-sticks', title: 'Pick Up Sticks', interest: 'games', kind: 'sticks', description: 'An old-school favourite in Singapore. Lift the top sticks, keep a steady eye, and collect points together.', duration: '5 min', icon: '🥢', prompts: ['Which games did your family play growing up?'] },
   {
     id: 'garden-quiz', title: 'A little green knowledge', interest: 'gardening', kind: 'quiz', description: 'Discover a few growing secrets, one friendly question at a time.', duration: '5 min', icon: '🌱',
     prompts: ['What would you love to grow together in Singapore’s warm, tropical weather?'],
@@ -231,20 +508,135 @@ export function getPetStats(state, date = new Date()) {
   const storyExperience = state.petJourney.weeks.filter(week => week.repliedAt !== null).length * 15;
   const experience = gameExperience + careExperience + storyExperience;
   const level = Math.floor(experience / 40) + 1;
-  const stage = experience >= 180 ? 'Story keeper' : experience >= 80 ? 'Little explorer' : experience >= 30 ? 'Curious sprout' : 'New friend';
+  const form = getPetForm(experience);
+  const evolutionIndex = PET_EVOLUTIONS.indexOf(form);
   const week = getPetWeek(state, date);
   return {
     experience,
     gameExperience,
     level,
-    stage,
+    stage: form.name,
+    form,
+    evolutionIndex,
+    nextEvolution: PET_EVOLUTIONS[evolutionIndex + 1] ?? null,
     progress: experience % 40,
     nextLevelAt: level * 40,
+    challenges: CHALLENGES.filter(item => level >= item.unlockLevel),
     fedToday: state.petJourney.fedDates.includes(getDateKey(date)),
     week,
     unlockedDecorations: PET_DECORATIONS.filter(item => experience >= item.unlockXp),
     answeredWeeks: state.petJourney.weeks.filter(item => item.repliedAt !== null).length,
   };
+}
+
+export function getLearningStage(age = 12) {
+  if (!Number.isInteger(age) || age < 6 || age > 110) fail('Choose an age from 6 to 110.');
+  return LEARNING_STAGES[age < 9 ? 0 : age < 12 ? 1 : 2];
+}
+
+export function getLearningSettings(state, age = state.profile?.age ?? 12, challenge = 1) {
+  const stage = getLearningStage(age);
+  const option = CHALLENGES.find(item => item.id === challenge);
+  if (!option || getPetStats(state).level < option.unlockLevel) fail(`This challenge needs Charlie to reach level ${option?.unlockLevel ?? 4}.`);
+  return { age: stage.age, challenge };
+}
+
+function cleanLearning(value) {
+  if (!isObject(value) || !LEARNING_STAGES.some(item => item.age === value.age) || !CHALLENGES.some(item => item.id === value.challenge)) fail('Invalid learning settings.');
+  return { age: value.age, challenge: value.challenge };
+}
+
+export function getLearningActivity(activityId, learning) {
+  const activity = activityById.get(activityId);
+  if (!activity) fail('Please choose an available activity.');
+  if (learning === undefined) return activity;
+  const settings = cleanLearning(learning);
+  if (activity.kind === 'sticks') return activity;
+  const field = activity.kind === 'quiz' ? 'questions' : 'prompts';
+  const junior = activity.kind === 'quiz' ? JUNIOR_QUESTIONS : JUNIOR_PROMPTS;
+  const explorer = activity.kind === 'quiz' ? EXPLORER_QUESTIONS : EXPLORER_PROMPTS;
+  const items = settings.age === 6 ? junior[activityId] : settings.age === 9 ? explorer[activityId] : activity[field];
+  const count = settings.challenge === 1 ? 4 : settings.challenge === 2 ? 5 : items.length;
+  const ordered = activity.kind === 'collaborative' && settings.age < 12;
+  const selected = ordered && count < items.length ? [...items.slice(0, count - 1), items.at(-1)] : items.slice(0, count);
+  return { ...activity, [field]: selected, ...(ordered ? { ordered: true } : {}) };
+}
+
+export const STICK_COLOURS = [
+  { name: 'Yellow', color: '#b77a05', points: 1 },
+  { name: 'Blue', color: '#3475b4', points: 3 },
+  { name: 'Red', color: '#b94d4b', points: 5 },
+  { name: 'Black', color: '#383c43', points: 25 },
+];
+
+// Replay moves against a seeded pile to validate completion and scores.
+export function createStickGame({ seed = Math.floor(Math.random() * 4294967296), count = 9 } = {}) {
+  if (!Number.isInteger(seed) || seed < 0 || seed > 4294967295 || ![9, 15, 21].includes(count)) fail('Invalid stick pile.');
+  return { seed, count, moves: [] };
+}
+
+function stickPile(game) {
+  let seed = game.seed;
+  const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+  return Array.from({ length: game.count }, (_, id) => {
+    const x = 120 + random() * 160, y = 100 + random() * 140;
+    const angle = random() * Math.PI, length = 120 + random() * 80;
+    return { id, x1: x - Math.cos(angle) * length / 2, y1: y - Math.sin(angle) * length / 2, x2: x + Math.cos(angle) * length / 2, y2: y + Math.sin(angle) * length / 2, ...STICK_COLOURS[id % STICK_COLOURS.length] };
+  });
+}
+
+function sticksTouch(a, b) {
+  const distance = (x, y, line) => {
+    const dx = line.x2 - line.x1, dy = line.y2 - line.y1;
+    const t = Math.max(0, Math.min(1, ((x - line.x1) * dx + (y - line.y1) * dy) / (dx * dx + dy * dy)));
+    return Math.hypot(x - line.x1 - t * dx, y - line.y1 - t * dy);
+  };
+  const cross = (line, x, y) => (line.x2 - line.x1) * (y - line.y1) - (line.y2 - line.y1) * (x - line.x1);
+  const intersects = cross(a, b.x1, b.y1) * cross(a, b.x2, b.y2) <= 0
+    && cross(b, a.x1, a.y1) * cross(b, a.x2, a.y2) <= 0
+    && Math.max(a.x1, a.x2) >= Math.min(b.x1, b.x2) && Math.max(b.x1, b.x2) >= Math.min(a.x1, a.x2)
+    && Math.max(a.y1, a.y2) >= Math.min(b.y1, b.y2) && Math.max(b.y1, b.y2) >= Math.min(a.y1, a.y2);
+  return intersects || Math.min(distance(a.x1, a.y1, b), distance(a.x2, a.y2, b), distance(b.x1, b.y1, a), distance(b.x2, b.y2, a)) <= 7;
+}
+
+export function getStickGameStats(game) {
+  if (!isObject(game) || !Number.isInteger(game.seed) || ![9, 15, 21].includes(game.count)) fail('Invalid stick game.');
+  createStickGame(game);
+  if (!Array.isArray(game.moves) || game.moves.length > 10000) fail('Invalid stick moves.');
+  const remaining = stickPile(game), scores = [0, 0], collected = [0, 0];
+  let hp = 3, turn = 0, message = 'Look for a stick with nothing crossing over it.';
+  for (const move of game.moves) {
+    if (!remaining.length) fail('This stick game is already complete.');
+    if (move === 'rest') {
+      if (hp !== 0) fail('Rest after using all three HP.');
+      hp = 3;
+      message = 'HP restored. Take your time and try again.';
+      continue;
+    }
+    if (move === 'pass') { turn = 1 - turn; message = 'Turn passed. Look for a top stick.'; continue; }
+    if (hp === 0) fail('Restore HP before picking another stick.');
+    const index = remaining.findIndex(stick => stick.id === move);
+    if (!Number.isInteger(move) || index < 0) fail('Choose a stick still on the table.');
+    const stick = remaining[index];
+    if (remaining.some(other => other.id > stick.id && sticksTouch(stick, other))) {
+      hp--;
+      turn = 1 - turn;
+      message = `Stick ${stick.id + 1} has another stick on top. −1 HP. Pass the turn.`;
+    } else {
+      scores[turn] += stick.points;
+      collected[turn]++;
+      remaining.splice(index, 1);
+      message = `Stick ${stick.id + 1} lifted! +${stick.points} stick points. Pick again or pass.`;
+    }
+  }
+  return { remaining, scores, collected, hp, turn, message, finished: remaining.length === 0,
+    available: remaining.filter(stick => !remaining.some(other => other.id > stick.id && sticksTouch(stick, other))).map(stick => stick.id) };
+}
+
+export function pickStick(game, id) {
+  const next = { ...game, moves: [...game.moves, id] };
+  getStickGameStats(next);
+  return next;
 }
 
 function validDateKey(value) {
@@ -326,11 +718,20 @@ export function completeSession(state, session) {
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) fail('Please choose a rating from 1 to 5.');
   if (!isText(note, 500)) fail('Please keep your review to 500 characters.');
   if (typeof addFriend !== 'boolean') fail('Please choose a valid friendship option.');
+  if (session.learning) getLearningSettings(state, session.learning.age, session.learning.challenge);
+  if (activity.kind === 'sticks' && !getStickGameStats(session.sticks).finished) fail('Clear the stick pile before saving.');
   if (personId !== null && !personIds.has(personId)) fail('Please choose an available sample profile.');
   if (personId !== null && getMode(state.profile) === 'family') fail('Family activities take place with someone you know, without community matching.');
   if (personId !== null && !getMatches(state).some(person => person.id === personId)) fail('Please choose a sample profile with a shared interest from another generation.');
   if (addFriend && personId === null) fail('A community session is required to add a sample friend.');
   const review = { id, sessionId: id, personId, activityId, interest: activity.interest, rating, note: note.trim(), ...sessionMetadata(session) };
+  if (session.learning) review.learning = cleanLearning(session.learning);
+  if (activity.kind === 'sticks') {
+    const expected = CHALLENGES[(session.learning?.challenge ?? 1) - 1].sticks;
+    if (session.sticks.count !== expected) fail('Invalid stick challenge.');
+    review.stickScores = getStickGameStats(session.sticks).scores;
+    review.stickCount = expected;
+  }
   return {
     ...state,
     points: state.points + 30,
@@ -352,7 +753,7 @@ function cleanTogetherNames(names) {
 
 export function createTogetherSession(options) {
   if (!isObject(options) || !isText(options.id, 120, 1) || !options.id.trim()) fail('This session needs a valid identifier.');
-  const activity = activityById.get(options.activityId);
+  const activity = getLearningActivity(options.activityId, options.learning);
   if (!activity) fail('Please choose an available activity.');
   const names = cleanTogetherNames(options.names);
   return {
@@ -361,6 +762,8 @@ export function createTogetherSession(options) {
     answers: [[], []], revealed: false, started: false, finished: false,
     startedAt: Number.isSafeInteger(options.startedAt) ? options.startedAt : null,
     dailyThemeDate: options.dailyThemeDate || null,
+    ...(options.learning ? { learning: cleanLearning(options.learning) } : {}),
+    ...(activity.kind === 'sticks' ? { sticks: createStickGame({ seed: options.seed, count: CHALLENGES[(options.learning?.challenge ?? 1) - 1].sticks }) } : {}),
   };
 }
 
@@ -368,11 +771,18 @@ export function createTogetherSession(options) {
 // This prevents a partially completed quiz from being submitted as a finished one.
 function checkTogetherSession(session) {
   if (!isObject(session) || !isText(session.id, 120, 1) || !session.id.trim() || session.mode !== 'in-person' || session.personId !== null) fail('Please start a valid together session.');
-  const activity = activityById.get(session.activity?.id);
+  const activity = getLearningActivity(session.activity?.id, session.learning);
   if (!activity) fail('Please choose an available activity.');
   if (!Array.isArray(session.participants) || session.participants.some(participant => !isObject(participant))) fail('This session needs two participants.');
   cleanTogetherNames(session.participants.map(participant => participant.name));
   if (typeof session.started !== 'boolean' || typeof session.finished !== 'boolean' || typeof session.revealed !== 'boolean' || ![0, 1].includes(session.turn)) fail('Invalid activity progress.');
+  if (activity.kind === 'sticks') {
+    const game = getStickGameStats(session.sticks);
+    if (session.sticks.count !== CHALLENGES[(session.learning?.challenge ?? 1) - 1].sticks || session.step !== 0 || session.turn !== game.turn || session.finished !== game.finished || session.revealed
+      || !Array.isArray(session.answers) || session.answers.length !== 2 || session.answers.some(answers => !Array.isArray(answers) || answers.length)
+      || (!session.started && session.sticks.moves.length)) fail('Invalid stick game progress.');
+    return activity;
+  }
   const count = activity.kind === 'quiz' ? activity.questions.length : activity.prompts.length;
   if (!Number.isInteger(session.step) || session.step < 0 || session.step >= count) fail('Invalid activity progress.');
   if (!Array.isArray(session.answers) || session.answers.length !== 2 || session.answers.some(answers => !Array.isArray(answers))) fail('Invalid activity answers.');
@@ -406,6 +816,7 @@ export function answerTogetherQuestion(session, index) {
 
 export function advanceTogetherSession(session) {
   const activity = checkTogetherSession(session);
+  if (activity.kind === 'sticks') fail('Clear the stick pile to finish this game.');
   if (!session.started || session.finished) fail('Start an unfinished activity before continuing.');
   if (activity.kind === 'quiz' && !session.revealed) fail('Both participants need to answer before continuing.');
   if (activity.kind !== 'quiz' && session.turn === 0) return { ...session, activity, turn: 1 };
@@ -416,6 +827,7 @@ export function advanceTogetherSession(session) {
 
 export function skipTogetherStep(session) {
   const activity = checkTogetherSession(session);
+  if (activity.kind === 'sticks') fail('Clear the stick pile to finish this game.');
   if (!session.started || session.finished) fail('Start an unfinished activity before continuing.');
   if (activity.kind === 'quiz') {
     if (session.revealed) fail('This question has already been answered. Continue to the next question.');
@@ -444,6 +856,7 @@ export function completeTogetherSession(state, session, reviews = null) {
   if (!session.started || !session.finished) fail('Both participants need to finish the activity first.');
   const feedback = cleanTogetherReviews(reviews ?? [{ rating: null, note: '' }, { rating: null, note: '' }]);
   if (state.completedSessions.includes(session.id)) return state;
+  if (session.learning) getLearningSettings(state, session.learning.age, session.learning.challenge);
   const names = cleanTogetherNames(session.participants.map(participant => participant.name));
   const participants = names.map((name, index) => ({
     name, ...feedback[index],
@@ -452,7 +865,11 @@ export function completeTogetherSession(state, session, reviews = null) {
   const review = {
     id: session.id, sessionId: session.id, personId: null, activityId: activity.id,
     interest: activity.interest, rating: feedback.every(item => Number.isInteger(item.rating)) ? Math.round((feedback[0].rating + feedback[1].rating) / 2) : null,
-    note: '', mode: 'in-person', participants, ...sessionMetadata({
+    note: '', mode: 'in-person', participants,
+    ...(session.learning ? { learning: cleanLearning(session.learning) } : {}),
+    ...(activity.kind === 'quiz' ? { questionCount: activity.questions.length } : {}),
+    ...(activity.kind === 'sticks' ? { stickScores: getStickGameStats(session.sticks).scores, stickCount: session.sticks.count } : {}),
+    ...sessionMetadata({
       completedAt: session.completedAt,
       durationMs: session.startedAt !== null && Number.isSafeInteger(session.startedAt) ? Math.min(43200000, Math.max(0, (session.completedAt || Date.now()) - session.startedAt)) : session.durationMs,
       dailyThemeDate: session.dailyThemeDate,
@@ -496,11 +913,25 @@ function validatedState(value) {
   state.completedSessions = [...value.completedSessions];
   state.reviews = value.reviews.map(review => {
     if (!isObject(review) || !isText(review.id, 120, 1) || review.id !== review.sessionId || !state.completedSessions.includes(review.sessionId)) fail('Invalid saved review.');
-    const activity = activityById.get(review.activityId);
+    const activity = getLearningActivity(review.activityId, review.learning);
     const rated = Number.isInteger(review.rating) && review.rating >= 1 && review.rating <= 5;
     if (!activity || review.interest !== activity.interest || (!rated && !(review.mode === 'in-person' && review.rating === null)) || !isText(review.note, 500)) fail('Invalid saved review.');
     if (review.personId !== null && !personIds.has(review.personId)) fail('Invalid saved review profile.');
     const result = { id: review.id, sessionId: review.sessionId, personId: review.personId, activityId: review.activityId, interest: review.interest, rating: review.rating, note: review.note };
+    if (review.learning !== undefined) result.learning = cleanLearning(review.learning);
+    if (review.questionCount !== undefined) {
+      if (activity.kind !== 'quiz' || review.questionCount !== activity.questions.length) fail('Invalid question count.');
+      result.questionCount = review.questionCount;
+    }
+    if (review.stickScores !== undefined || review.stickCount !== undefined) {
+      const expected = CHALLENGES[(review.learning?.challenge ?? 1) - 1].sticks;
+      if (activity.kind !== 'sticks' || review.stickCount !== expected || !Array.isArray(review.stickScores) || review.stickScores.length !== 2
+        || review.stickScores.some(score => !Number.isInteger(score) || score < 0)) fail('Invalid saved stick scores.');
+      const total = Array.from({ length: expected }, (_, index) => STICK_COLOURS[index % 4].points).reduce((sum, score) => sum + score, 0);
+      if (review.stickScores[0] + review.stickScores[1] !== total) fail('Invalid saved stick score total.');
+      result.stickScores = [...review.stickScores];
+      result.stickCount = expected;
+    }
     if (review.completedAt !== undefined || review.durationMs !== undefined || review.dailyThemeDate !== undefined) {
       if (review.completedAt !== undefined && (!Number.isSafeInteger(review.completedAt) || review.completedAt < 0)) fail('Invalid saved review metadata.');
       if (review.durationMs !== undefined && (!Number.isSafeInteger(review.durationMs) || review.durationMs < 0 || review.durationMs > 43200000)) fail('Invalid saved review metadata.');

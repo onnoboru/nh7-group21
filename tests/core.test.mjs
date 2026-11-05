@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ACTIVITIES, GROUPS, INTERESTS, PEOPLE, REWARDS, PET_QUESTIONS, STORAGE_KEY, createState, setProfile, getMode, getMatches, getRecommendedGroups, getSuggestedActivity, getPetStats, getPetWeek, getWeekStartKey, feedPet, askPetQuestion, replyToPetQuestion, completeSession, createTogetherSession, answerTogetherQuestion, advanceTogetherSession, skipTogetherStep, completeTogetherSession, joinGroup, redeemReward, saveState, loadState } from '../dist/core.js';
+import { ACTIVITIES, GROUPS, INTERESTS, PEOPLE, REWARDS, PET_QUESTIONS, PET_EVOLUTIONS, getPetForm, STORAGE_KEY, createStickGame, getStickGameStats, pickStick, getLearningSettings, getLearningActivity, getLearningStage, CHALLENGES, createState, setProfile, getMode, getMatches, getRecommendedGroups, getSuggestedActivity, getPetStats, getPetWeek, getWeekStartKey, feedPet, askPetQuestion, replyToPetQuestion, completeSession, createTogetherSession, answerTogetherQuestion, advanceTogetherSession, skipTogetherStep, completeTogetherSession, joinGroup, redeemReward, saveState, loadState } from '../dist/core.js';
 
 const profile = (age = 20, interests = ['gardening'], guardianConsent = false) => setProfile(createState(), { name: ' Alex ', age, interests, guardianConsent });
 const session = (state, id = 'session-1', changes = {}) => completeSession(state, { id, personId: null, activityId: 'garden-quiz', rating: 5, note: ' Lovely! ', addFriend: false, ...changes });
@@ -386,7 +386,14 @@ test('activity suggestions choose eligible unplayed content before allowing repe
   assert.ok(ACTIVITIES.includes(noProfileSuggestion));
   assert.ok(!played.has(noProfileSuggestion.id));
   state = session(state, 'music-2', { activityId: 'music-memories', rating: 5 });
-  const allPlayed = ACTIVITIES.reduce((current, activity, index) => session(current, `played-${index}`, { activityId: activity.id }), state);
+  const allPlayed = ACTIVITIES.reduce((current, activity, index) => {
+    let sticks;
+    if (activity.kind === 'sticks') {
+      sticks = createStickGame({ seed: 123 });
+      while (!getStickGameStats(sticks).finished) sticks = pickStick(sticks, getStickGameStats(sticks).available[0]);
+    }
+    return session(current, `played-${index}`, { activityId: activity.id, sticks });
+  }, state);
   assert.ok(ACTIVITIES.includes(getSuggestedActivity(allPlayed)));
 });
 
@@ -404,4 +411,173 @@ test('anonymous shared moments combine with later sample connections and one dev
   const target = storage();
   assert.equal(saveState(redeemed, target), true);
   assert.deepEqual(loadState(target), redeemed);
+});
+
+test('learning bands change quiz content and challenge unlocks follow earned levels', () => {
+  const initial = createState();
+  for (const [age, level] of [[6, 1], [8, 1], [9, 2], [11, 2], [12, 3], [70, 3]]) {
+    assert.equal(getLearningStage(age).level, level);
+  }
+  for (const age of [5, 111, NaN, '9']) assert.throws(() => getLearningStage(age));
+  assert.throws(() => getLearningSettings(initial, 8, 2), /level 2/);
+  assert.throws(() => getLearningSettings(initial, 8, 3), /level 4/);
+  const levelTwo = Array.from({ length: 4 }, (_, index) => index).reduce((state, index) => completeTogetherSession(state, finishTogether('family-recipes', `unlock-${index}`)), initial);
+  assert.equal(getPetStats(levelTwo).level, 2);
+  assert.equal(getLearningSettings(levelTwo, 8, 2).age, 6);
+  assert.throws(() => getLearningSettings(levelTwo, 8, 3));
+  const levelFour = Array.from({ length: 8 }, (_, index) => index).reduce((state, index) => completeTogetherSession(state, finishTogether('family-recipes', `master-${index}`)), levelTwo);
+  assert.equal(getPetStats(levelFour).level, 4);
+  assert.equal(getLearningSettings(levelFour, 8, 3).challenge, 3);
+  for (const id of ['garden-quiz', 'playful-puzzles', 'singapore-quiz']) {
+    const junior = getLearningActivity(id, { age: 6, challenge: 1 });
+    const explorer = getLearningActivity(id, { age: 9, challenge: 1 });
+    const thinker = getLearningActivity(id, { age: 12, challenge: 1 });
+    assert.equal(junior.questions.length, 4);
+    assert.notDeepEqual(junior.questions, explorer.questions);
+    assert.notDeepEqual(explorer.questions, thinker.questions);
+    for (const age of [6, 9, 12]) for (const challenge of CHALLENGES) {
+      const adapted = getLearningActivity(id, { age, challenge: challenge.id });
+      adapted.questions.forEach(question => assert.ok(question.answers[question.correct]));
+      assert.ok(adapted.questions.length >= 4);
+    }
+  }
+});
+
+test('age-specific quiz completion persists its actual question count and scores', () => {
+  let current = { ...createTogetherSession({ id: 'junior-quiz', activityId: 'garden-quiz', names: ['Alex', 'Gran'], learning: { age: 6, challenge: 1 } }), started: true };
+  while (!current.finished) {
+    current = answerTogetherQuestion(current, current.activity.questions[current.step].correct);
+    current = answerTogetherQuestion(current, current.activity.questions[current.step].correct);
+    current = advanceTogetherSession(current);
+  }
+  const state = completeTogetherSession(createState(), current);
+  assert.equal(state.reviews[0].questionCount, 4);
+  assert.equal(state.reviews[0].participants[0].score, 4);
+  const target = storage();
+  assert.ok(saveState(state, target));
+  assert.deepEqual(loadState(target), state);
+  assert.equal(saveState({ ...state, reviews: [{ ...state.reviews[0], questionCount: 5 }] }, target), false);
+});
+
+test('stick geometry, turns, HP, resting, and completion agree across seeds and pile sizes', () => {
+  for (const count of [9, 15, 21]) for (const seed of [0, 1, 123, 4294967295]) {
+    let game = createStickGame({ count, seed });
+    assert.deepEqual(getStickGameStats(game), getStickGameStats(createStickGame({ count, seed })));
+    let stats = getStickGameStats(game);
+    const blocked = stats.remaining.find(stick => !stats.available.includes(stick.id));
+    if (blocked) {
+      for (let attempt = 0; attempt < 3; attempt++) game = pickStick(game, blocked.id);
+      stats = getStickGameStats(game);
+      assert.equal(stats.hp, 0);
+      assert.equal(stats.turn, 1);
+      assert.equal(stats.remaining.length, count);
+      assert.deepEqual(stats.scores, [0, 0]);
+      assert.throws(() => pickStick(game, stats.available[0]), /Restore HP/);
+      game = pickStick(game, 'rest');
+      assert.equal(getStickGameStats(game).hp, 3);
+    }
+    while (!getStickGameStats(game).finished) {
+      stats = getStickGameStats(game);
+      assert.ok(stats.available.length > 0, 'Every unfinished pile must have a removable top stick.');
+      const turnBefore = stats.turn;
+      game = pickStick(game, stats.available[0]);
+      assert.equal(getStickGameStats(game).turn, turnBefore, 'Successful picks retain the turn.');
+      if (!getStickGameStats(game).finished) game = pickStick(game, 'pass');
+    }
+    stats = getStickGameStats(game);
+    assert.equal(stats.collected[0] + stats.collected[1], count);
+    assert.equal(stats.scores[0] + stats.scores[1], Array.from({ length: count }, (_, index) => [1, 3, 5, 25][index % 4]).reduce((sum, value) => sum + value, 0));
+    assert.throws(() => pickStick(game, 0));
+  }
+  assert.throws(() => getStickGameStats({ count: 9, moves: [] }));
+  assert.throws(() => createStickGame({ count: 100 }));
+  assert.throws(() => pickStick(createStickGame({ seed: 1 }), 100));
+  assert.throws(() => pickStick(createStickGame({ seed: 1 }), 'rest'));
+});
+
+test('stick games require clearing the pile, preserve scores, and award growth and points once', () => {
+  const initial = createState();
+  let current = { ...createTogetherSession({ id: 'sticks-1', activityId: 'pick-up-sticks', names: ['Alex', 'Gran'], seed: 123, learning: { age: 6, challenge: 1 } }), started: true };
+  assert.throws(() => completeTogetherSession(initial, { ...current, finished: true }));
+  assert.throws(() => advanceTogetherSession(current));
+  assert.throws(() => skipTogetherStep(current));
+  while (!getStickGameStats(current.sticks).finished) current.sticks = pickStick(current.sticks, getStickGameStats(current.sticks).available[0]);
+  current.finished = true;
+  current.turn = getStickGameStats(current.sticks).turn;
+  const state = completeTogetherSession(initial, current);
+  assert.equal(state.points, 30);
+  assert.equal(getPetStats(state).experience, 10);
+  assert.deepEqual(state.reviews[0].stickScores, getStickGameStats(current.sticks).scores);
+  assert.equal(state.reviews[0].stickCount, 9);
+  assert.equal(completeTogetherSession(state, current), state);
+  const target = storage();
+  assert.ok(saveState(state, target));
+  assert.deepEqual(loadState(target), state);
+  const changed = structuredClone(state);
+  changed.reviews[0].stickScores[0]++;
+  assert.equal(saveState(changed, target), false);
+  const adult = profile(20, ['games']);
+  assert.throws(() => session(adult, 'solo-sticks', { activityId: 'pick-up-sticks', sticks: createStickGame({ seed: 123 }) }));
+  assert.equal(session(adult, 'solo-sticks', { activityId: 'pick-up-sticks', sticks: current.sticks }).points, 30);
+});
+
+test('every talk activity adapts its subject and language by age and still completes and saves', () => {
+  for (const activity of ACTIVITIES.filter(item => !['quiz', 'sticks'].includes(item.kind))) {
+    const variants = [6, 9, 12].map(age => getLearningActivity(activity.id, { age, challenge: 1 }));
+    assert.notDeepEqual(variants[0].prompts, variants[1].prompts, activity.id);
+    assert.notDeepEqual(variants[1].prompts, variants[2].prompts, activity.id);
+    for (const age of [6, 9, 12]) {
+      const learning = { age, challenge: 1 };
+      let current = { ...createTogetherSession({ id: `${activity.id}-${age}`, activityId: activity.id, names: ['Alex', 'Gran'], learning }), started: true };
+      assert.equal(current.activity.prompts.length, 4);
+      assert.throws(() => completeTogetherSession(createState(), current));
+      let turns = 0;
+      while (!current.finished) { current = advanceTogetherSession(current); turns++; }
+      assert.equal(turns, 8, 'Both participants must explore every age-specific prompt.');
+      const state = completeTogetherSession(createState(), current);
+      const target = storage();
+      assert.ok(saveState(state, target), `${activity.id} / ${age}`);
+      assert.deepEqual(loadState(target), state);
+      const full = getLearningActivity(activity.id, { age, challenge: 3 });
+      assert.ok(full.prompts.length > current.activity.prompts.length);
+      if (activity.kind === 'collaborative' && age < 12) {
+        assert.equal(current.activity.ordered, true);
+        assert.equal(current.activity.prompts.at(-1), full.prompts.at(-1), 'Short story rounds retain their ending.');
+      }
+    }
+    assert.equal(getLearningActivity(activity.id), activity, 'Legacy sessions keep their original content.');
+  }
+});
+
+test('stick counts depend on challenge rather than the learning age band', () => {
+  for (const challenge of CHALLENGES) {
+    for (const age of [6, 9, 12]) {
+      const learning = { age, challenge: challenge.id };
+      const current = createTogetherSession({ id: 'same-pile', activityId: 'pick-up-sticks', names: ['Alex', 'Gran'], learning, seed: 123 });
+      assert.equal(current.sticks.count, challenge.sticks);
+      assert.equal(getLearningActivity('pick-up-sticks', learning), ACTIVITIES.find(item => item.id === 'pick-up-sticks'));
+    }
+  }
+});
+
+test('Charlie evolves at earned growth thresholds and old save data restores the same form', () => {
+  for (const [xp, expected] of [[0, 'new-friend'], [29, 'new-friend'], [30, 'curious-sprout'], [79, 'curious-sprout'], [80, 'little-explorer'], [179, 'little-explorer'], [180, 'story-keeper'], [500, 'story-keeper']]) {
+    assert.equal(getPetForm(xp).id, expected);
+  }
+  for (const xp of [-1, 1.2, NaN, '30']) assert.throws(() => getPetForm(xp));
+  let state = profile();
+  for (let round = 1; round <= 18; round++) {
+    state = session(state, `evolution-${round}`);
+    const stats = getPetStats(state);
+    assert.equal(stats.form, getPetForm(round * 10));
+    assert.equal(stats.stage, stats.form.name);
+    assert.equal(stats.nextEvolution, PET_EVOLUTIONS[stats.evolutionIndex + 1] ?? null);
+    if ([3, 8, 18].includes(round)) {
+      const target = storage();
+      assert.ok(saveState(state, target));
+      assert.deepEqual(getPetStats(loadState(target)), stats);
+      assert.equal(Object.hasOwn(state.petJourney, 'form'), false, 'Forms derive from existing growth; no save migration is required.');
+    }
+  }
+  assert.equal(getPetStats(state).nextEvolution, null);
 });
