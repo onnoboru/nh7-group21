@@ -4,9 +4,10 @@ import {
   getWeekStartKey, getMonthKey, getPetWeek, getPetQuestionForWeek, getPetStats, feedPet, askPetQuestion, replyToPetQuestion,
   completeSession, joinGroup, redeemReward, createTogetherSession, answerTogetherQuestion, advanceTogetherSession, skipTogetherStep, completeTogetherSession,
   LEARNING_STAGES, CHALLENGES, STICK_COLOURS, getLearningStage, getLearningSettings, getLearningActivity, createStickGame, getStickGameStats, pickStick,
-  PET_EVOLUTIONS, getPetForm,
+  PET_EVOLUTIONS, getPetForm, updateTogetherReview, setReviewSelfie,
 } from './core.js';
 import { saveVoiceNote, loadVoiceNote, deleteVoiceNote, clearVoiceNotes, canRecordVoiceNote } from './local-audio.js';
+import { savePhoto, loadPhoto, deletePhoto, clearPhotos } from './local-photos.js';
 
 const app = document.querySelector('#app');
 const dialogRoot = document.querySelector('#dialog-root');
@@ -17,6 +18,9 @@ let session = null;
 let returnFocus = null;
 let toastTimer;
 let pendingRewardId = null;
+let selfieFlow = null;
+let selfieStream = null;
+let selfieObjectUrl = null;
 let storageAvailable = true;
 let voiceRecorder = null;
 let voiceStream = null;
@@ -214,8 +218,8 @@ function renderEvolution(previousExperience, pet) {
   const previous = getPetForm(previousExperience);
   return `<div class="evolution-reveal" data-from="${previous.id}" data-to="${pet.form.id}" role="img" aria-label="Charlie evolves from ${esc(previous.name)} to ${esc(pet.stage)}"><div class="evolution-halo" aria-hidden="true"></div><div class="evolution-before" aria-hidden="true">${renderCharlieMascot({ experience: previousExperience })}</div><div class="evolution-after" aria-hidden="true">${renderCharlieMascot(pet)}</div><span class="evolution-sparkles" aria-hidden="true">✦</span></div><p class="evolution-stage">${esc(pet.stage)}</p>`;
 }
-function showPetEvolution(previousExperience, pet, { replay = false, reward = '', eyebrow = 'NEW GROWTH' } = {}) {
-  showDialog(`<div class="celebration compact-completion evolution-celebration" role="status"><p class="eyebrow">${replay ? 'EVOLUTION REPLAY' : esc(eyebrow)}</p><h2 id="dialog-title">Charlie evolved!</h2>${renderEvolution(previousExperience, pet)}${reward ? `<p class="completion-unlock">${esc(reward)}</p>` : ''}${button('Done', 'close-dialog', 'primary celebration-dismiss')}</div>`, { className: 'compact-completion-modal evolution-modal', initialFocus: '.celebration-dismiss' });
+function showPetEvolution(previousExperience, pet, { replay = false, reward = '', eyebrow = 'NEW GROWTH', reviewId = null } = {}) {
+  showDialog(`<div class="celebration compact-completion evolution-celebration" role="status"><p class="eyebrow">${replay ? 'EVOLUTION REPLAY' : esc(eyebrow)}</p><h2 id="dialog-title">Charlie evolved!</h2>${renderEvolution(previousExperience, pet)}${reward ? `<p class="completion-unlock">${esc(reward)}</p>` : ''}${reviewId ? button('Selfie', 'selfie-offer', 'primary', `data-id="${esc(reviewId)}"`) : ''}${button('Done', 'close-dialog', 'secondary celebration-dismiss')}</div>`, { className: 'compact-completion-modal evolution-modal', initialFocus: '.celebration-dismiss' });
 }
 function renderEvolutionJourney(pet) {
   return `<section class="evolution-journey card"><h2>Charlie’s journey</h2><div class="evolution-forms">${PET_EVOLUTIONS.map((form, index) => `<article class="evolution-form ${pet.experience >= form.unlockXp ? 'unlocked' : 'locked'}">${renderCharlieMascot({ experience: form.unlockXp })}<h3>${esc(form.name)}</h3>${pet.experience >= form.unlockXp ? index ? button('Replay', 'evolution-replay', 'secondary small', `data-id="${form.id}"`) : '<span class="field-help">First friend</span>' : `<span class="field-help">${form.unlockXp} growth</span>`}</article>`).join('')}</div></section>`;
@@ -313,13 +317,14 @@ function renderCircle() {
   if (!state.profile && !state.reviews.length && !state.petJourney.fedDates.length && !state.petJourney.weeks.length) return `<div class="page-heading"><div><p class="eyebrow">GOOD COMPANY GROWS HERE</p><h1 class="page-title">Your little circle<span class="greeting-dot">.</span></h1></div></div><div class="empty-state"><span class="empty-icon" aria-hidden="true">♡</span><h2>A place for familiar faces.</h2><p>Play face to face to save your shared moments here. A profile is only needed to explore sample community connections.</p>${button('Together', 'together-setup', 'primary')}${button('Create profile', 'profile', 'primary')}</div>`;
   const friends = PEOPLE.filter(p => state.friends.includes(p.id));
   const groups = GROUPS.filter(g => state.joinedGroups.includes(g.id));
-  return `<div class="page-heading"><div><p class="eyebrow">FAMILIAR FACES. SHARED LITTLE JOYS.</p><h1 class="page-title">Your little circle<span class="greeting-dot">.</span></h1><p class="muted">Your shared moments, saved connections, and interest groups, on this device.</p></div></div>${renderSharedJourney(false)}${state.profile ? `<section><div class="section-heading"><h2>Sample connections <span class="count-label">${friends.length}</span></h2><span class="muted">Saved on this device</span></div>${friends.length ? `<div class="grid match-grid">${friends.map(renderMatch).join('')}</div>` : `<div class="card empty-state"><span class="empty-icon" aria-hidden="true">♡</span><h3>${isFamily() ? 'Your best company is close to home.' : 'Every friendship starts with a hello.'}</h3><p>${isFamily() ? 'Family mode offers shared activities with someone beside you.' : 'Complete a simulated activity and choose “Add to my circle” in your review.'}</p>${button(isFamily() ? 'Activities' : 'Discover', isFamily() ? 'activities' : 'discover', 'secondary')}</div>`}</section><section><div class="section-heading"><h2>Your interest groups <span class="count-label">${groups.length}</span></h2></div>${groups.length ? `<div class="group-list">${groups.map(renderGroup).join('')}</div>` : `<div class="card empty-state"><h3>Find people who love what you love.</h3><p>Join a sample interest group to add it here. Live group discussions are not part of this demo.</p>${button('Groups', 'discover', 'secondary')}</div>`}</section>` : `<div class="notice">Your face-to-face sessions stay on this device. ${button('Settings', 'profile', 'ghost small')}</div>`}<section><div class="section-heading"><h2>Moments you’ve made</h2></div>${state.reviews.length ? `<div class="circle-list">${state.reviews.slice().reverse().map(review => review.mode === 'in-person' ? renderTogetherHistory(review) : `<article class="card review-card"><div class="icon-tile" aria-hidden="true">${esc(ACTIVITIES.find(a => a.id === review.activityId)?.icon || '✦')}</div><div><h3>${esc(ACTIVITIES.find(a => a.id === review.activityId)?.title || 'Shared activity')}</h3><p class="muted">${review.personId ? `With ${esc(person(review.personId)?.name || 'a sample friend')}` : 'A moment for yourself or family'} · <span aria-label="${review.rating} out of 5 stars">${'★'.repeat(review.rating)}${'☆'.repeat(5 - review.rating)}</span></p>${review.stickScores ? `<p>${review.stickScores.reduce((sum, score) => sum + score, 0)} stick points · ${review.stickCount} sticks cleared</p>` : ''}${review.note ? `<p>${esc(review.note)}</p>` : ''}</div><span class="points-earned">+30 points</span></article>`).join('')}</div>` : '<p class="muted">Your completed activities and reflections will appear here.</p>'}</section>`;
+  return `<div class="page-heading"><div><p class="eyebrow">FAMILIAR FACES. SHARED LITTLE JOYS.</p><h1 class="page-title">Your little circle<span class="greeting-dot">.</span></h1><p class="muted">Your shared moments, saved connections, and interest groups, on this device.</p></div></div>${renderSharedJourney(false)}${state.profile ? `<section><div class="section-heading"><h2>Sample connections <span class="count-label">${friends.length}</span></h2><span class="muted">Saved on this device</span></div>${friends.length ? `<div class="grid match-grid">${friends.map(renderMatch).join('')}</div>` : `<div class="card empty-state"><span class="empty-icon" aria-hidden="true">♡</span><h3>${isFamily() ? 'Your best company is close to home.' : 'Every friendship starts with a hello.'}</h3><p>${isFamily() ? 'Family mode offers shared activities with someone beside you.' : 'Complete a simulated activity and choose “Add to my circle” in your review.'}</p>${button(isFamily() ? 'Activities' : 'Discover', isFamily() ? 'activities' : 'discover', 'secondary')}</div>`}</section><section><div class="section-heading"><h2>Your interest groups <span class="count-label">${groups.length}</span></h2></div>${groups.length ? `<div class="group-list">${groups.map(renderGroup).join('')}</div>` : `<div class="card empty-state"><h3>Find people who love what you love.</h3><p>Join a sample interest group to add it here. Live group discussions are not part of this demo.</p>${button('Groups', 'discover', 'secondary')}</div>`}</section>` : `<div class="notice">Your face-to-face sessions stay on this device. ${button('Settings', 'profile', 'ghost small')}</div>`}<section><div class="section-heading"><h2>Moments you’ve made</h2></div>${state.reviews.length ? `<div class="circle-list">${state.reviews.slice().reverse().map(review => review.mode === 'in-person' ? renderTogetherHistory(review) : `<article class="card review-card"><div class="icon-tile" aria-hidden="true">${esc(ACTIVITIES.find(a => a.id === review.activityId)?.icon || '✦')}</div><div><h3>${esc(ACTIVITIES.find(a => a.id === review.activityId)?.title || 'Shared activity')}</h3><p class="muted">${review.personId ? `With ${esc(person(review.personId)?.name || 'a sample friend')}` : 'A moment for yourself or family'} · <span aria-label="${review.rating} out of 5 stars">${'★'.repeat(review.rating)}${'☆'.repeat(5 - review.rating)}</span></p>${review.stickScores ? `<p>${review.stickScores.reduce((sum, score) => sum + score, 0)} stick points · ${review.stickCount} sticks cleared</p>` : ''}${review.note ? `<p>${esc(review.note)}</p>` : ''}${renderMomentActions(review)}</div><span class="points-earned">+30 points</span></article>`).join('')}</div>` : '<p class="muted">Your completed activities and reflections will appear here.</p>'}</section>`;
 }
 function renderRewards() {
   return `<div class="page-heading"><div><p class="eyebrow">LITTLE MOMENTS DESERVE A LITTLE THANK YOU</p><h1 class="page-title">Kindness comes around<span class="greeting-dot">.</span></h1><p class="muted">Collect points for showing up and sharing time together.</p></div></div><section class="balance-card"><div><span class="eyebrow">THIS DEVICE’S KINDNESS POINTS</span><div class="balance-value"><span aria-hidden="true">✦</span> ${state.points}</div><p>Complete a face-to-face activity to earn 30 shared points.</p></div>${button('Play', 'activities', 'primary')}</section><div class="notice">These are sample rewards for exploring the prototype. Vouchers have no monetary value and cannot be used at real businesses.</div><div class="section-heading"><h2>A little something for you</h2><span class="section-subtitle">Demo rewards</span></div><div class="grid reward-grid">${REWARDS.map(reward => `<article class="card reward-card"><div class="reward-art" aria-hidden="true">${esc(reward.icon)}</div><span class="eyebrow">SAMPLE VOUCHER</span><h2>${esc(reward.name)}</h2><p class="muted">${esc(reward.description)}</p><div class="card-footer"><span class="reward-cost">✦ ${reward.cost} points</span>${button('Redeem', 'redeem', 'secondary small', `data-id="${esc(reward.id)}" ${state.points < reward.cost ? 'disabled' : ''} aria-label="Redeem ${esc(reward.name)} for ${reward.cost} points"`)}</div>${state.points < reward.cost ? `<p class="field-help">${reward.cost - state.points} more points to go</p>` : ''}</article>`).join('')}</div><section><div class="section-heading"><h2>Your sample vouchers</h2></div>${state.redemptions.length ? `<div class="voucher-list">${state.redemptions.slice().reverse().map(item => `<article class="card voucher-item" data-voucher-id="${esc(item.id)}"><div><h3>${esc(REWARDS.find(r => r.id === item.rewardId)?.name || 'Sample reward')}</h3><p class="muted">Demo only · no cash value · ${item.cost} points</p></div><code class="voucher-code" tabindex="-1">${esc(item.code)}</code></article>`).join('')}</div>` : '<div class="card empty-state"><h3>Something to look forward to.</h3><p>Your redeemed sample vouchers will be saved here.</p></div>'}</section>`;
 }
 
 function showDialog(content, { wide = false, initialFocus = null, className = '' } = {}) {
+  releaseSelfie();
   pendingRewardId = null;
   if (!dialogRoot.firstElementChild) returnFocus = document.activeElement;
   releaseVoiceObjectUrl();
@@ -331,6 +336,7 @@ function showDialog(content, { wide = false, initialFocus = null, className = ''
   if (!modal.contains(document.activeElement)) modal.focus();
 }
 function closeDialog() {
+  releaseSelfie();
   pendingRewardId = null;
   releaseVoiceObjectUrl();
   dialogRoot.innerHTML = '';
@@ -622,7 +628,7 @@ function renderTogetherSession() {
 }
 function renderTogetherHistory(review) {
   const a = ACTIVITIES.find(item => item.id === review.activityId);
-  return `<article class="card together-history"><div class="section-heading"><div><span class="eyebrow">MISSION COMPLETE</span><h3>${esc(a?.title || 'Shared activity')}</h3><p class="muted">${review.participants.map(participant => esc(participant.name)).join(' &amp; ')} · completed together</p></div><span class="points-earned">+30 shared points</span></div><div class="together-scores">${review.participants.map((participant, index) => `<div class="player-result"><h4>${esc(participant.name)}</h4>${participant.rating === null ? '<p class="muted">Played together</p>' : `<p>${'★'.repeat(participant.rating)}${'☆'.repeat(5 - participant.rating)} · ${participant.rating}/5</p>`}${participant.score === null ? '' : `<p>${participant.score} / ${review.questionCount || a?.questions.length || 0} correct</p>`}${review.stickScores ? `<p>${review.stickScores[index]} stick points</p>` : ''}${participant.note ? `<p>${esc(participant.note)}</p>` : ''}</div>`).join('')}</div></article>`;
+  return `<article class="card together-history"><div class="section-heading"><div><span class="eyebrow">MISSION COMPLETE</span><h3>${esc(a?.title || 'Shared activity')}</h3><p class="muted">${review.participants.map(participant => esc(participant.name)).join(' &amp; ')} · completed together</p></div><span class="points-earned">+30 shared points</span></div><div class="together-scores">${review.participants.map((participant, index) => `<div class="player-result"><h4>${esc(participant.name)}</h4>${participant.rating === null ? '<p class="muted">Played together</p>' : `<p>${'★'.repeat(participant.rating)}${'☆'.repeat(5 - participant.rating)} · ${participant.rating}/5</p>`}${participant.score === null ? '' : `<p>${participant.score} / ${review.questionCount || a?.questions.length || 0} correct</p>`}${review.stickScores ? `<p>${review.stickScores[index]} stick points</p>` : ''}${participant.note ? `<p>${esc(participant.note)}</p>` : ''}</div>`).join('')}</div>${renderMomentActions(review)}</article>`;
 }
 function completeTogetherMission() {
   if (!session?.finished || session.mode !== 'in-person') return;
@@ -647,7 +653,7 @@ function completeTogetherMission() {
   const streak = getJourneyStats(state).currentStreak;
   session = null;
   render();
-  showDialog(`<div class="celebration compact-completion" role="status" aria-live="polite"><p class="eyebrow">MISSION COMPLETE</p><h2 id="dialog-title">${evolved ? 'Charlie evolved!' : 'Nice teamwork!'}</h2>${evolved ? renderEvolution(previousPetExperience, petGrowth) : `<div class="charlie-celebration-art">${renderCharlieMascot()}</div>`}<div class="completion-rewards"><strong>+30 points</strong><span class="pet-growth-celebration">Charlie +10 growth</span></div>${scoreLine}${petGrowth.level > previousPetLevel ? `<p class="completion-unlock">Level ${petGrowth.level}!</p>` : ''}${newDecoration ? `<p class="completion-unlock">${esc(newDecoration.icon)} New decoration</p>` : ''}${CHALLENGES.filter(item => previousPetLevel < item.unlockLevel && petGrowth.level >= item.unlockLevel).map(item => `<p class="completion-unlock">${item.name} unlocked</p>`).join('')}${finishedDailyTheme ? `<p class="completion-theme">Daily theme complete${streak > 1 ? ` · ${streak}-day streak` : ''}</p>` : ''}<div class="completion-actions">${button('Replay', 'quick-pair-play', 'primary')}${button('Done', 'close-dialog', 'secondary celebration-dismiss')}</div></div>`, { className: `celebration-modal compact-completion-modal ${evolved ? 'evolution-modal' : ''}`, initialFocus: '.celebration-dismiss' });
+  showDialog(`<div class="celebration compact-completion" role="status" aria-live="polite"><p class="eyebrow">MISSION COMPLETE</p><h2 id="dialog-title">${evolved ? 'Charlie evolved!' : 'Nice teamwork!'}</h2>${evolved ? renderEvolution(previousPetExperience, petGrowth) : `<div class="charlie-celebration-art">${renderCharlieMascot()}</div>`}<div class="completion-rewards"><strong>+30 points</strong><span class="pet-growth-celebration">Charlie +10 growth</span></div>${scoreLine}${petGrowth.level > previousPetLevel ? `<p class="completion-unlock">Level ${petGrowth.level}!</p>` : ''}${newDecoration ? `<p class="completion-unlock">${esc(newDecoration.icon)} New decoration</p>` : ''}${CHALLENGES.filter(item => previousPetLevel < item.unlockLevel && petGrowth.level >= item.unlockLevel).map(item => `<p class="completion-unlock">${item.name} unlocked</p>`).join('')}${finishedDailyTheme ? `<p class="completion-theme">Daily theme complete${streak > 1 ? ` · ${streak}-day streak` : ''}</p>` : ''}<div class="completion-actions">${button('Review', 'together-review', 'primary', `data-id="${esc(completed.id)}"`)}${button('Replay', 'quick-pair-play', 'secondary')}${button('Done', 'close-dialog', 'ghost celebration-dismiss')}</div></div>`, { className: `celebration-modal compact-completion-modal ${evolved ? 'evolution-modal' : ''}`, initialFocus: '.celebration-dismiss' });
   animateCharlie('grow');
 }
 
@@ -687,6 +693,134 @@ function renderSession() {
   dialogRoot.querySelector('.prompt-text').focus();
   if (preferences.autoRead) speak(speechTextForSession());
 }
+function renderMomentActions(review) {
+  const reviewed = Number.isInteger(review.rating) && !review.participants?.some(person => person.rating === null);
+  return `<div class="moment-actions">${review.mode === 'in-person' ? button('Review', 'together-review', 'secondary small', `data-id="${esc(review.sessionId)}"`) : ''}${reviewed ? button(review.selfieId ? 'Photo' : 'Selfie', review.selfieId ? 'selfie-view' : 'selfie-offer', 'secondary small', `data-id="${esc(review.sessionId)}"`) : ''}</div>`;
+}
+
+function showTogetherReview(id) {
+  const review = state.reviews.find(item => item.sessionId === id && item.mode === 'in-person');
+  if (!review) return;
+  showDialog(`${dialogHeading('A MOMENT TO REMEMBER', 'How was your game?')}<form id="together-review-form" data-id="${esc(id)}"><p class="muted">Rate your own experience, then pass the device.</p>${review.participants.map((participant, index) => `<section class="player-review"><fieldset class="form-field"><legend>${esc(participant.name)}</legend><div class="review-stars">${[1, 2, 3, 4, 5].map(value => `<label class="rating-choice"><input type="radio" name="rating${index}" value="${value}" required ${participant.rating === value ? 'checked' : ''}><span aria-hidden="true">★</span><span>${value}</span><span class="sr-only">out of 5 stars</span></label>`).join('')}</div></fieldset><div class="form-field"><label for="review-note-${index}">A favourite moment? <span class="muted">(optional)</span></label><textarea id="review-note-${index}" name="note${index}" maxlength="500" rows="2">${esc(participant.note)}</textarea></div></section>`).join('')}<p class="field-help">Saved only on this device.</p><p class="form-error" id="together-review-error" role="alert"></p><div class="form-actions">${button('Later', 'close-dialog', 'ghost')}<button type="submit" class="button primary">Save</button></div></form>`, { className: 'review-modal' });
+}
+
+function releaseSelfie() {
+  selfieFlow = null;
+  selfieStream?.getTracks().forEach(track => track.stop());
+  selfieStream = null;
+  const video = dialogRoot.querySelector('#selfie-video');
+  if (video) video.srcObject = null;
+  if (selfieObjectUrl) URL.revokeObjectURL(selfieObjectUrl);
+  selfieObjectUrl = null;
+}
+
+function showSelfie(id, stage = 'offer', blob = null) {
+  const review = state.reviews.find(item => item.sessionId === id);
+  if (!review || !Number.isInteger(review.rating) || review.participants?.some(person => person.rating === null)) return;
+  const canCapture = Boolean(globalThis.navigator?.mediaDevices?.getUserMedia && globalThis.indexedDB);
+  const frame = stage === 'camera'
+    ? '<div class="selfie-frame"><video id="selfie-video" autoplay muted playsinline aria-label="Front camera preview"></video><p id="selfie-camera-status" role="status">Opening camera…</p></div>'
+    : stage === 'preview' || stage === 'saved'
+      ? '<div class="selfie-frame"><img id="selfie-image" alt="Your saved moment"></div>'
+      : '<div class="selfie-placeholder" aria-hidden="true"><span>📷</span><span>♡</span></div>';
+  const controls = stage === 'camera' ? `${button('Cancel', 'selfie-offer', 'secondary', `data-id="${esc(id)}"`)}${button('Capture', 'selfie-capture', 'primary', 'disabled')}`
+    : stage === 'preview' ? `${button('Retake', 'selfie-start', 'secondary', `data-id="${esc(id)}"`)}${button('Save', 'selfie-save', 'primary')}`
+      : stage === 'saved' ? `${button('Delete', 'selfie-delete', 'ghost danger', `data-id="${esc(id)}"`)}${button('Done', 'close-dialog', 'primary')}`
+        : `${button('Skip', 'close-dialog', 'secondary')}${canCapture ? button('Camera', 'selfie-start', 'primary', `data-id="${esc(id)}"`) : ''}`;
+  showDialog(`${dialogHeading(stage === 'saved' ? 'YOUR SHARED MEMORY' : 'REVIEW SAVED', stage === 'saved' ? 'A moment to keep.' : 'Keep a photo, too?')}<p class="muted">${stage === 'saved' ? 'This photo stays on this device.' : 'Optional. Get everyone’s OK before taking a photo. It stays on this device.'}</p>${frame}${!canCapture && stage === 'offer' ? '<p class="notice">Camera or photo storage is unavailable here. Your review is saved. Try a supported browser over HTTPS or localhost.</p>' : ''}<p id="selfie-error" class="form-error" role="alert"></p><div class="form-actions">${controls}</div>`, { className: 'selfie-modal' });
+  selfieFlow = { id, stage, blob, saving: false };
+  if (blob) {
+    selfieObjectUrl = URL.createObjectURL(blob);
+    dialogRoot.querySelector('#selfie-image').src = selfieObjectUrl;
+  }
+}
+
+async function startSelfie(id) {
+  showSelfie(id, 'camera');
+  const flow = selfieFlow;
+  if (!flow || flow.stage !== 'camera') return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } } });
+    if (selfieFlow !== flow) { stream.getTracks().forEach(track => track.stop()); return; }
+    selfieStream = stream;
+    const video = dialogRoot.querySelector('#selfie-video');
+    video.srcObject = stream;
+    await video.play();
+    if (selfieFlow !== flow) return;
+    dialogRoot.querySelector('#selfie-camera-status').textContent = 'Ready? Smile together.';
+    dialogRoot.querySelector('[data-action="selfie-capture"]').disabled = false;
+  } catch (error) {
+    if (selfieFlow !== flow) return;
+    showSelfie(id);
+    document.querySelector('#selfie-error').textContent = error.name === 'NotAllowedError' ? 'Camera access was declined. You can allow it in browser settings or skip the photo.' : 'The camera could not be opened. Close other camera apps, retry, or skip the photo.';
+  }
+}
+
+async function captureSelfie() {
+  const flow = selfieFlow;
+  const video = dialogRoot.querySelector('#selfie-video');
+  if (!flow || flow.stage !== 'camera' || !selfieStream || !video?.videoWidth) return;
+  const canvas = document.createElement('canvas');
+  const scale = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
+  canvas.width = Math.round(video.videoWidth * scale);
+  canvas.height = Math.round(video.videoHeight * scale);
+  const context = canvas.getContext('2d');
+  context.translate(canvas.width, 0);
+  context.scale(-1, 1);
+  context.drawImage(video, 0, 0, canvas.width, canvas.height);
+  dialogRoot.querySelector('[data-action="selfie-capture"]').disabled = true;
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.88));
+  if (selfieFlow !== flow) return;
+  if (!blob) {
+    document.querySelector('#selfie-error').textContent = 'The photo could not be captured. Please retry.';
+    dialogRoot.querySelector('[data-action="selfie-capture"]').disabled = false;
+    return;
+  }
+  showSelfie(flow.id, 'preview', blob);
+}
+
+async function saveSelfie() {
+  const flow = selfieFlow;
+  if (!flow || flow.stage !== 'preview' || !flow.blob || flow.saving) return;
+  flow.saving = true;
+  dialogRoot.querySelector('[data-action="selfie-save"]').disabled = true;
+  const photoId = `photo-${crypto.randomUUID()}`;
+  try {
+    await savePhoto(photoId, flow.blob);
+    if (selfieFlow !== flow) { await deletePhoto(photoId); return; }
+    const previousId = state.reviews.find(review => review.sessionId === flow.id)?.selfieId;
+    commit(setReviewSelfie(state, flow.id, photoId));
+    render();
+    showSelfie(flow.id, 'saved', flow.blob);
+    notify(storageAvailable ? 'Photo saved. Find it in My circle.' : 'Photo linked for this visit only. Browser storage is unavailable.');
+    if (previousId) await deletePhoto(previousId);
+  } catch (error) {
+    if (selfieFlow !== flow) return;
+    flow.saving = false;
+    document.querySelector('#selfie-error').textContent = error.message;
+    dialogRoot.querySelector('[data-action="selfie-save"]').disabled = false;
+  }
+}
+
+async function viewSelfie(id) {
+  const review = state.reviews.find(item => item.sessionId === id);
+  if (!review?.selfieId) return;
+  showSelfie(id, 'saved');
+  const flow = selfieFlow;
+  try {
+    const blob = await loadPhoto(review.selfieId);
+    if (selfieFlow !== flow) return;
+    if (!blob) {
+      document.querySelector('#selfie-error').textContent = 'This photo is no longer stored on this device. Delete the link to take another.';
+      return;
+    }
+    selfieObjectUrl = URL.createObjectURL(blob);
+    dialogRoot.querySelector('#selfie-image').src = selfieObjectUrl;
+  } catch (error) {
+    if (selfieFlow === flow) document.querySelector('#selfie-error').textContent = error.message;
+  }
+}
+
 function showReview() {
   const a = session.activity;
   const partner = person(session.personId);
@@ -706,6 +840,7 @@ function handleClose() {
 
 function navigate(next) {
   if (!['discover', 'activities', 'characters', 'circle', 'rewards', 'settings', 'storybook'].includes(next)) return;
+  releaseSelfie();
   page = next;
   if (location.hash !== `#${next}`) history.replaceState(null, '', `#${next}`);
   render();
@@ -724,6 +859,23 @@ async function action(target) {
   else if (name === 'speak-prompt') speak(speechTextForSession());
   else if (name === 'stop-reading') { if (speechAvailable()) globalThis.speechSynthesis.cancel(); }
   else if (name === 'close-dialog') handleClose();
+  else if (name === 'together-review') showTogetherReview(id);
+  else if (name === 'selfie-offer') showSelfie(id);
+  else if (name === 'selfie-start') await startSelfie(id);
+  else if (name === 'selfie-capture') await captureSelfie();
+  else if (name === 'selfie-save') await saveSelfie();
+  else if (name === 'selfie-view') await viewSelfie(id);
+  else if (name === 'selfie-delete') {
+    const review = state.reviews.find(item => item.sessionId === id);
+    if (!review?.selfieId) return;
+    const flow = selfieFlow;
+    await deletePhoto(review.selfieId);
+    if (state.reviews.find(item => item.sessionId === id)?.selfieId !== review.selfieId) return;
+    commit(setReviewSelfie(state, id, null));
+    render();
+    if (selfieFlow === flow) showSelfie(id);
+    notify('Photo deleted. Your review is kept.');
+  }
   else if (name === 'evolution-replay') {
     const index = PET_EVOLUTIONS.findIndex(form => form.id === id);
     const pet = getPetStats(state);
@@ -847,14 +999,17 @@ async function action(target) {
     target?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'center' });
     target?.querySelector('.voucher-code')?.focus({ preventScroll: true });
   }
-  else if (name === 'reset-confirm') showDialog(`${dialogHeading('START FRESH', 'Reset your demo?')}<p class="muted">This removes profiles, points, game history, Charlie’s growth, weekly stories, saved voice notes, player names, connections, group choices, and sample vouchers from this browser.</p><div class="form-actions">${button('Cancel', 'profile', 'secondary')}${button('Reset', 'reset', 'danger primary')}</div>`);
+  else if (name === 'reset-confirm') showDialog(`${dialogHeading('START FRESH', 'Reset your demo?')}<p class="muted">This removes profiles, points, game history, Charlie’s growth, weekly stories, saved voice notes and selfies, player names, connections, group choices, and sample vouchers from this browser.</p><div class="form-actions">${button('Cancel', 'profile', 'secondary')}${button('Reset', 'reset', 'danger primary')}</div>`);
   else if (name === 'reset') {
     let removed = false;
     try { localStorage.removeItem(STORAGE_KEY); removed = true; } catch { /* Storage may be blocked. */ }
+    releaseSelfie();
+    let photosRemoved = true;
+    try { if (globalThis.indexedDB) await clearPhotos(); } catch { photosRemoved = false; }
     let audioRemoved = true;
     try { if (globalThis.indexedDB) await clearVoiceNotes(); } catch { audioRemoved = false; }
     commit(createState()); savePreferences({ lastPair: null, learning: null }); session = null; navigate('discover'); closeDialog();
-    notify(!audioRemoved ? 'Your game and story data were reset, but saved audio could not be removed. Clear this site’s browser data to delete it.' : removed || storageAvailable ? 'Your demo has been reset. A fresh start awaits.' : 'This visit has been reset, but saved browser data could not be removed and may return on reload. Clear this site’s data in your browser settings to remove it.');
+    notify(!audioRemoved || !photosRemoved ? 'Your game and story data were reset, but saved audio or photos could not be removed. Clear this site’s browser data to delete them.' : removed || storageAvailable ? 'Your demo has been reset. A fresh start awaits.' : 'This visit has been reset, but saved browser data could not be removed and may return on reload. Clear this site’s data in your browser settings to remove it.');
   }
 }
 document.addEventListener('click', event => {
@@ -929,6 +1084,16 @@ document.addEventListener('submit', async event => {
       else notify('Charlie’s story has been updated.');
     } catch (error) { document.querySelector('#pet-reply-error').textContent = error.message; }
   }
+  if (event.target.id === 'together-review-form') {
+    event.preventDefault();
+    const id = event.target.dataset.id;
+    const form = new FormData(event.target);
+    try {
+      commit(updateTogetherReview(state, id, [0, 1].map(index => ({ rating: Number(form.get(`rating${index}`)), note: String(form.get(`note${index}`) || '') }))));
+      render(); showSelfie(id);
+      notify('Review saved. Thank you for sharing!');
+    } catch (error) { document.querySelector('#together-review-error').textContent = error.message; }
+  }
   if (event.target.id === 'review-form') {
     event.preventDefault();
     if (!session?.finished || session.mode === 'in-person') return;
@@ -941,9 +1106,10 @@ document.addEventListener('submit', async event => {
       const finishedDailyTheme = session.dailyThemeDate === getDateKey();
       const streak = getJourneyStats(state).currentStreak;
       const pet = getPetStats(state);
+      const reviewId = session.id;
       session = null; render(); closeDialog();
-      if (hasEvolved(previousPetExperience, pet)) showPetEvolution(previousPetExperience, pet, { reward: '+30 points · +10 growth' });
-      else { notify(`${finishedDailyTheme ? `Daily theme complete! Congratulations${streak ? ` — a ${streak}-day streak` : ''}. ` : ''}Charlie gained 10 growth points and is now level ${pet.level}${pet.level > previousPetLevel ? '!' : '.'} You earned 30 points.`); animateCharlie('grow'); }
+      if (hasEvolved(previousPetExperience, pet)) showPetEvolution(previousPetExperience, pet, { reward: '+30 points · +10 growth', reviewId });
+      else { showSelfie(reviewId); notify(`${finishedDailyTheme ? `Daily theme complete! Congratulations${streak ? ` — a ${streak}-day streak` : ''}. ` : ''}Charlie gained 10 growth points and is now level ${pet.level}${pet.level > previousPetLevel ? '!' : '.'} You earned 30 points.`); animateCharlie('grow'); }
     } catch (error) { document.querySelector('#review-error').textContent = error.message; }
   }
 });
@@ -965,6 +1131,7 @@ document.addEventListener('keydown', event => {
     else if (!event.shiftKey && (document.activeElement === last || !focusable.includes(document.activeElement))) { event.preventDefault(); first.focus(); }
   }
 });
+window.addEventListener('pagehide', releaseSelfie);
 window.addEventListener('hashchange', () => { if (!dialogRoot.firstElementChild) navigate(location.hash.slice(1)); });
 const initialPage = location.hash.slice(1);
 if (['discover', 'activities', 'characters', 'circle', 'rewards', 'settings', 'storybook'].includes(initialPage)) page = initialPage;

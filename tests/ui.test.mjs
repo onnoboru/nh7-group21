@@ -9,7 +9,8 @@ import * as core from '../dist/core.js';
 // Replace only the ESM import so dependencies can be injected into an isolated VM.
 const source = readFileSync(new URL('../dist/app.js', import.meta.url), 'utf8')
   .replace(/^import \{[\s\S]*?\} from '\.\/core\.js';/m, '')
-  .replace(/^import \{[\s\S]*?\} from '\.\/local-audio\.js';/m, '');
+  .replace(/^import \{[\s\S]*?\} from '\.\/local-audio\.js';/m, '')
+  .replace(/^import \{[\s\S]*?\} from '\.\/local-photos\.js';/m, '');
 
 function harness({ initial = null, initialPreferences = null, blocked = false, initialHash = '', dailyTheme = null } = {}) {
   const handlers = {};
@@ -52,6 +53,7 @@ function harness({ initial = null, initialPreferences = null, blocked = false, i
     deleteVoiceNote: async id => { voiceNotes.delete(id); },
     clearVoiceNotes: async () => { voiceNotes.clear(); },
     canRecordVoiceNote: () => false,
+    savePhoto: async () => {}, loadPhoto: async () => null, deletePhoto: async () => {}, clearPhotos: async () => {},
     SpeechSynthesisUtterance: TestSpeechSynthesisUtterance, speechSynthesis,
     loadState: () => core.loadState(storage), saveState: state => core.saveState(state, storage),
     window: { scrollTo() {}, addEventListener() {} },
@@ -411,7 +413,7 @@ test('display preferences, read aloud, and saved pair quick start work on this d
   assert.equal(ui.preferences().lastPair, null);
 });
 
-test('face-to-face conversations need both turns and finish without a rating form', async () => {
+test('face-to-face conversations need both turns and offer a review after completion', async () => {
   const ui = harness();
   const session = await startTogether(ui, { kind: 'conversation' });
   assert.equal(session.activity.kind, 'conversation');
@@ -911,4 +913,57 @@ test('solo review evolution keeps the saved reward and cannot award it twice', a
   await ui.submit('review-form', { rating: '5', note: '' });
   assert.equal(ui.stored().points, 90);
   assert.equal(core.getPetStats(ui.stored()).experience, 30);
+});
+
+test('completed games offer independent reviews, then an optional selfie, without awarding twice', async () => {
+  const ui = harness();
+  await startTogether(ui, { kind: 'conversation' });
+  await finishTogether(ui);
+  const id = ui.stored().reviews[0].sessionId;
+  assert.match(ui.dialog(), /data-action="together-review"/);
+  await ui.click('selfie-offer', { id });
+  assert.doesNotMatch(ui.dialog(), /REVIEW SAVED/);
+  await ui.click('together-review', { id });
+  assert.match(ui.dialog(), /id="together-review-form"/);
+  assert.match(ui.dialog(), /name="rating0"/);
+  assert.match(ui.dialog(), /name="rating1"/);
+  await ui.submit('together-review-form', { rating0: '5' }, { id });
+  assert.match(ui.error('#together-review-error'), /rating/);
+  assert.equal(ui.stored().reviews[0].rating, null);
+  await ui.submit('together-review-form', { rating0: '5', rating1: '4', note0: '<script>memory</script>', note1: 'Loved it' }, { id });
+  assert.match(ui.dialog(), /REVIEW SAVED/);
+  assert.match(ui.dialog(), /Keep a photo, too/);
+  assert.match(ui.dialog(), /data-action="close-dialog"[^>]*>Skip/);
+  assert.match(ui.dialog(), /Camera or photo storage is unavailable/);
+  assert.equal(ui.stored().points, 30);
+  assert.equal(core.getPetStats(ui.stored()).experience, 10);
+  assert.equal(ui.stored().reviews[0].participants[1].rating, 4);
+  await ui.submit('together-review-form', { rating0: '5', rating1: '4', note0: '<script>memory</script>', note1: 'Loved it' }, { id });
+  assert.equal(ui.stored().points, 30);
+  assert.equal(ui.stored().reviews.length, 1);
+  await ui.click('close-dialog');
+  await ui.click('navigate', { page: 'circle' });
+  assert.match(ui.html(), /data-action="selfie-offer"/);
+  const reloaded = harness({ initial: ui.stored() });
+  await reloaded.click('navigate', { page: 'circle' });
+  assert.match(reloaded.html(), /4\/5/);
+  assert.match(reloaded.html(), /&lt;script&gt;memory&lt;\/script&gt;/);
+  assert.doesNotMatch(reloaded.html(), /<script>memory<\/script>/);
+  await reloaded.click('together-review', { id });
+  assert.match(reloaded.dialog(), /name="rating1" value="4" required checked/);
+  assert.match(reloaded.dialog(), />Loved it<\/textarea>/);
+});
+
+test('solo reviews also offer optional selfies and skipping keeps the saved reward', async () => {
+  const ui = harness();
+  await profile(ui);
+  await finishQuiz(ui);
+  await ui.submit('review-form', { rating: '4', note: 'A lovely game' });
+  assert.match(ui.dialog(), /REVIEW SAVED/);
+  await ui.click('close-dialog');
+  assert.equal(ui.dialog(), '');
+  assert.equal(ui.stored().points, 30);
+  await ui.click('navigate', { page: 'circle' });
+  assert.match(ui.html(), /A lovely game/);
+  assert.match(ui.html(), /data-action="selfie-offer"/);
 });

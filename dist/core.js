@@ -878,6 +878,31 @@ export function completeTogetherSession(state, session, reviews = null) {
   return { ...state, points: state.points + 30, reviews: [...state.reviews, review], completedSessions: [...state.completedSessions, session.id] };
 }
 
+export function updateTogetherReview(state, sessionId, reviews) {
+  const saved = state.reviews.find(review => review.sessionId === sessionId);
+  if (!saved || saved.mode !== 'in-person') fail('Finish a shared activity before leaving a review.');
+  const feedback = cleanTogetherReviews(reviews);
+  if (feedback.some(review => review.rating === null)) fail('Each participant needs to choose a rating from 1 to 5.');
+  const updated = { ...saved, rating: Math.round((feedback[0].rating + feedback[1].rating) / 2),
+    participants: saved.participants.map((participant, index) => ({ ...participant, ...feedback[index] })) };
+  return { ...state, reviews: state.reviews.map(review => review === saved ? updated : review) };
+}
+
+function validSelfieId(id) {
+  return typeof id === 'string' && /^photo-[A-Za-z0-9_-]{8,128}$/.test(id);
+}
+
+export function setReviewSelfie(state, sessionId, selfieId) {
+  const saved = state.reviews.find(review => review.sessionId === sessionId);
+  if (!saved || !Number.isInteger(saved.rating) || saved.participants?.some(person => person.rating === null)) fail('Save your review before adding a photo.');
+  if (selfieId !== null && !validSelfieId(selfieId)) fail('Please choose a valid photo.');
+  if (selfieId !== null && state.reviews.some(review => review !== saved && review.selfieId === selfieId)) fail('This photo belongs to another moment.');
+  const updated = { ...saved };
+  if (selfieId === null) delete updated.selfieId;
+  else updated.selfieId = selfieId;
+  return { ...state, reviews: state.reviews.map(review => review === saved ? updated : review) };
+}
+
 export function joinGroup(state, groupId) {
   if (!state.profile) fail('Please create your profile before joining a sample group.');
   if (!groupIds.has(groupId)) fail('Please choose an available sample group.');
@@ -950,9 +975,14 @@ function validatedState(value) {
       if (allRated ? review.rating !== Math.round((participants[0].rating + participants[1].rating) / 2) : review.rating !== null) fail('Invalid saved together rating.');
       Object.assign(result, { mode: 'in-person', participants });
     }
+    if (review.selfieId !== undefined) {
+      if (!validSelfieId(review.selfieId) || !rated || result.participants?.some(person => person.rating === null)) fail('Invalid saved photo reference.');
+      result.selfieId = review.selfieId;
+    }
     return result;
   });
   if (state.reviews.length !== state.completedSessions.length || !unique(state.reviews.map(review => review.sessionId))) fail('Incomplete saved history.');
+  if (!unique(state.reviews.map(review => review.selfieId).filter(Boolean))) fail('Invalid saved photo references.');
   state.redemptions = value.redemptions.map((voucher, index) => {
     if (!isObject(voucher)) fail('Invalid saved voucher.');
     const reward = rewardById.get(voucher.rewardId);

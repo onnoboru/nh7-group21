@@ -1296,3 +1296,18 @@ body[data-text-size="extra-large"] .page-title { font-size: clamp(38px, 3vw, 46p
   .evolution-before { animation: none; opacity: 0; }
   .evolution-after, .evolution-halo, .evolution-sparkles { animation: none; opacity: 1; transform: none; }
 }
+
+/* Reflections and private, local photos after a game. */
+.moment-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.player-review + .player-review { border-top: 1px solid var(--line); padding-top: 20px; margin-top: 20px; }
+.player-review legend { font-weight: 700; }
+.selfie-modal { max-width: 560px; }
+.selfie-placeholder { display: flex; justify-content: center; align-items: center; gap: 20px; min-height: 150px; border-radius: 24px; background: #f8edda; color: #b46650; font-size: 48px; margin: 20px 0; }
+.selfie-frame { border-radius: 20px; background: #f8edda; overflow: hidden; margin: 20px 0; }
+.selfie-frame video, .selfie-frame img { display: block; width: 100%; max-height: 42dvh; min-height: 150px; object-fit: contain; }
+.selfie-frame video { transform: scaleX(-1); }
+#selfie-camera-status { text-align: center; padding: 8px 12px; margin: 0; }
+@media (max-width: 520px) {
+  .player-review .review-stars { gap: 6px; }
+  .player-review .rating-choice { flex: 1; min-width: 0; }
+}

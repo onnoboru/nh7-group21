@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ACTIVITIES, GROUPS, INTERESTS, PEOPLE, REWARDS, PET_QUESTIONS, PET_EVOLUTIONS, getPetForm, STORAGE_KEY, createStickGame, getStickGameStats, pickStick, getLearningSettings, getLearningActivity, getLearningStage, CHALLENGES, createState, setProfile, getMode, getMatches, getRecommendedGroups, getSuggestedActivity, getPetStats, getPetWeek, getWeekStartKey, feedPet, askPetQuestion, replyToPetQuestion, completeSession, createTogetherSession, answerTogetherQuestion, advanceTogetherSession, skipTogetherStep, completeTogetherSession, joinGroup, redeemReward, saveState, loadState } from '../dist/core.js';
+import { ACTIVITIES, GROUPS, INTERESTS, PEOPLE, REWARDS, PET_QUESTIONS, PET_EVOLUTIONS, getPetForm, STORAGE_KEY, createStickGame, getStickGameStats, pickStick, getLearningSettings, getLearningActivity, getLearningStage, CHALLENGES, createState, setProfile, getMode, getMatches, getRecommendedGroups, getSuggestedActivity, getPetStats, getPetWeek, getWeekStartKey, feedPet, askPetQuestion, replyToPetQuestion, completeSession, createTogetherSession, answerTogetherQuestion, advanceTogetherSession, skipTogetherStep, completeTogetherSession, updateTogetherReview, setReviewSelfie, joinGroup, redeemReward, saveState, loadState } from '../dist/core.js';
 
 const profile = (age = 20, interests = ['gardening'], guardianConsent = false) => setProfile(createState(), { name: ' Alex ', age, interests, guardianConsent });
 const session = (state, id = 'session-1', changes = {}) => completeSession(state, { id, personId: null, activityId: 'garden-quiz', rating: 5, note: ' Lovely! ', addFriend: false, ...changes });
@@ -580,4 +580,49 @@ test('Charlie evolves at earned growth thresholds and old save data restores the
     }
   }
   assert.equal(getPetStats(state).nextEvolution, null);
+});
+
+
+test('post-game reflections preserve scores, points, growth and history, and photos require a saved review', () => {
+  const completed = freeze(completeTogetherSession(createState(), finishTogether()));
+  const id = completed.reviews[0].sessionId;
+  assert.throws(() => setReviewSelfie(completed, id, 'photo-12345678'), /Save your review/);
+  const reviewed = updateTogetherReview(completed, id, [{ rating: 5, note: ' Favourite question ' }, { rating: 3, note: 'Together!' }]);
+  assert.equal(completed.reviews[0].rating, null);
+  assert.equal(reviewed.reviews[0].rating, 4);
+  assert.equal(reviewed.reviews[0].participants[0].note, 'Favourite question');
+  assert.deepEqual(reviewed.reviews[0].participants.map(person => person.score), completed.reviews[0].participants.map(person => person.score));
+  assert.equal(reviewed.points, 30);
+  assert.equal(getPetStats(reviewed).experience, 10);
+  assert.deepEqual(reviewed.completedSessions, completed.completedSessions);
+  const twice = updateTogetherReview(reviewed, id, [{ rating: 4 }, { rating: 4 }]);
+  assert.equal(twice.points, 30);
+  assert.equal(twice.reviews.length, 1);
+  for (const feedback of [[{ rating: null }, { rating: 5 }], [{ rating: 0 }, { rating: 5 }], [{ rating: 5, note: 'a'.repeat(501) }, { rating: 5 }]]) {
+    assert.throws(() => updateTogetherReview(completed, id, feedback));
+  }
+  assert.throws(() => updateTogetherReview(completed, 'missing', [{ rating: 5 }, { rating: 5 }]));
+  const withPhoto = setReviewSelfie(freeze(reviewed), id, 'photo-12345678');
+  assert.equal(withPhoto.reviews[0].selfieId, 'photo-12345678');
+  const saved = storage();
+  saveState(withPhoto, saved);
+  assert.deepEqual(loadState(saved), withPhoto);
+  const removed = setReviewSelfie(withPhoto, id, null);
+  assert.equal(removed.reviews[0].selfieId, undefined);
+  assert.equal(removed.points, 30);
+  assert.throws(() => setReviewSelfie(reviewed, id, 'javascript:alert(1)'), /valid photo/);
+  for (const selfieId of [null, '', 'bad', 'https://example.com/photo']) {
+    const invalid = structuredClone(withPhoto);
+    invalid.reviews[0].selfieId = selfieId;
+    assert.deepEqual(loadState(storage(JSON.stringify(invalid))), createState());
+  }
+  const unreviewed = structuredClone(completed);
+  unreviewed.reviews[0].selfieId = 'photo-12345678';
+  assert.deepEqual(loadState(storage(JSON.stringify(unreviewed))), createState());
+  const solo = session(profile());
+  const soloPhoto = setReviewSelfie(solo, solo.reviews[0].sessionId, 'photo-abcdefgh');
+  assert.equal(soloPhoto.points, solo.points);
+  const soloSaved = storage();
+  saveState(soloPhoto, soloSaved);
+  assert.deepEqual(loadState(soloSaved), soloPhoto);
 });
